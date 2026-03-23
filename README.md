@@ -8,6 +8,10 @@ Desktop-first migration tool for Feishu/Lark knowledge bases.
 ### 项目简介
 DocuFlowLarkAI 是一个面向企业知识库建设的桌面应用，帮助团队将本地文档批量迁移到飞书/多维知识空间，并通过模板复用、实时看板和自动化校验提升迁移效率与质量。
 
+<img width="3440" height="1406" alt="image" src="https://github.com/user-attachments/assets/0907fd2b-ce82-45ff-9ca2-dd1700ecee5e" />
+
+<img width="3440" height="1406" alt="image" src="https://github.com/user-attachments/assets/1b0b1f91-68d5-4ff8-94ba-4e5010afc8c6" />
+
 ### 最新模板升级
 你已扩展行业模板为「核心供给端 + 深度应用端」共 10 大类，覆盖从技术供给到业务落地的完整知识体系：
 
