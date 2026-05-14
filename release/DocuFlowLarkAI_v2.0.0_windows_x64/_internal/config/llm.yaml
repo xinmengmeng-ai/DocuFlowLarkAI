@@ -1,0 +1,64 @@
+providers:
+  deepseek:
+    enabled: false
+    api_key: ''
+    base_url: https://api.deepseek.com
+    model: deepseek-chat
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+  kimi:
+    enabled: false
+    api_key: ''
+    base_url: https://api.moonshot.cn
+    model: moonshot-v1-8k
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+  openai:
+    enabled: false
+    api_key: ''
+    base_url: https://api.openai.com
+    model: gpt-4-turbo-preview
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+  claude:
+    enabled: false
+    api_key: ''
+    base_url: https://api.anthropic.com
+    model: claude-3-sonnet-20240229
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+  qwen:
+    enabled: false
+    api_key: ''
+    base_url: https://dashscope.aliyuncs.com/api/v1
+    model: qwen-max
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+  ollama:
+    enabled: false
+    api_key: ''
+    base_url: http://localhost:11434
+    model: llama2-chinese
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+  mock:
+    enabled: false
+    api_key: ''
+    base_url: http://localhost/mock
+    model: mock
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+content_clean: true
+generate_summary: true
+extract_keywords: true
+auto_classify: true
+quality_check: true
+min_score: 70
+max_retry: 3

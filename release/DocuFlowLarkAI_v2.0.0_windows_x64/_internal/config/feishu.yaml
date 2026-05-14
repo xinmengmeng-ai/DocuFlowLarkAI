@@ -1,0 +1,13 @@
+app_id: ''
+app_secret: ''
+encrypt_key: null
+verification_token: null
+base_url: https://open.feishu.cn/open-apis
+mcp_url: https://mcp.feishu.cn/mcp
+timeout: 30
+max_retries: 3
+batch_size: 1000
+concurrent_limit: 5
+retry_attempts: 3
+default_space_id: ''
+auto_create_space: true

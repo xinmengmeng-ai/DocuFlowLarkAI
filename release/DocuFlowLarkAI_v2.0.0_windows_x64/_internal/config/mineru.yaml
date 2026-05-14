@@ -1,0 +1,10 @@
+use_local: true
+local_url: http://localhost:8000
+cloud_api_key: ''
+cloud_url: https://mineru.net/api/v1
+timeout: 300
+extract_images: true
+extract_tables: true
+ocr_enabled: true
+language: zh
+return_format: markdown

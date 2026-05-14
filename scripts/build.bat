@@ -3,7 +3,7 @@ setlocal
 chcp 65001 >nul
 
 set "APP_NAME=DocuFlowLarkAI"
-set "VERSION=1.0.0"
+set "VERSION=2.0.0"
 set "PACKAGE_NAME=%APP_NAME%_v%VERSION%_windows_x64"
 set "ROOT_DIR=%~dp0.."
 set "RELEASE_DIR=%ROOT_DIR%\release"
@@ -85,5 +85,5 @@ echo  Folder: %TARGET_DIR%
 echo  Zip:    %ZIP_PATH%
 echo ==========================================
 echo.
-pause
+if not "%NO_PAUSE%"=="1" pause
 exit /b 0

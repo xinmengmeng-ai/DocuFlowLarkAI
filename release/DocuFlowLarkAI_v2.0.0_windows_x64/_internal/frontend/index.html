@@ -1,0 +1,3221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>企业知识库迁移至飞书系统 - 架构可视化平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"/>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+
+        .arch-node {
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .arch-node.active {
+            transform: scale(1.02);
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+            border-color: #3b82f6;
+        }
+        .arch-node.active::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            transform: skewX(-20deg) translateX(-150%);
+            animation: shimmer 1.5s infinite;
+        }
+
+        @keyframes shimmer {
+            100% { transform: skewX(-20deg) translateX(150%); }
+        }
+
+        .flow-line {
+            position: relative;
+            height: 2px;
+            background: #e2e8f0;
+            width: 100%;
+            margin: 10px 0;
+        }
+        .flow-line::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 0%;
+            background: #3b82f6;
+            transition: width 0.3s ease;
+        }
+        .flow-line.active::after {
+            width: 100%;
+        }
+
+        /* 数据流动动画 */
+        @keyframes flowAnimation {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        .flow-line.flowing::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: 0;
+            width: 30%;
+            height: 6px;
+            background: linear-gradient(90deg, transparent, #3b82f6, #60a5fa, transparent);
+            border-radius: 3px;
+            animation: flowAnimation 1.5s linear infinite;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+        }
+
+        /* 节点脉冲动画 */
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 5px rgba(59, 130, 246, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.8), 0 0 30px rgba(96, 165, 250, 0.4); }
+        }
+        
+        .arch-node.pulsing {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .terminal {
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: #1e293b;
+            color: #10b981;
+        }
+        .log-entry {
+            margin-bottom: 4px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 2px;
+        }
+        .log-error { color: #ef4444; }
+        .log-warn { color: #f59e0b; }
+        .log-info { color: #3b82f6; }
+        .log-success { color: #10b981; }
+
+        .tree-node {
+            padding-left: 20px;
+            position: relative;
+        }
+        .tree-node::before {
+            content: '';
+            position: absolute;
+            left: 6px;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: #cbd5e1;
+        }
+        .tree-item {
+            padding: 4px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .tree-item::before {
+            content: '';
+            position: absolute;
+            left: 6px;
+            top: 14px;
+            width: 10px;
+            height: 1px;
+            background: #cbd5e1;
+        }
+
+        .drop-zone {
+            border: 2px dashed #cbd5e1;
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragover {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .task-item {
+            transition: all 0.2s ease;
+        }
+        .task-item:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden font-sans">
+    <!-- 顶部导航栏 -->
+    <header class="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 shadow-sm z-10">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center text-white font-bold">
+                <i class="fa-solid fa-layer-group"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-slate-800">企业知识库迁移系统 <span class="text-xs font-normal text-slate-500 ml-2">Architecture Visualization</span></h1>
+                <p class="text-xs text-slate-500">Windows Desktop Application v1.0.0</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2 px-3 py-1 bg-slate-100 rounded-full text-xs font-medium text-slate-600" id="system-status">
+                <span class="w-2 h-2 rounded-full bg-slate-400 animate-pulse" id="status-dot"></span>
+                <span id="status-text">系统就绪</span>
+            </div>
+            <button class="text-slate-500 hover:text-blue-600 transition-colors" onclick="toggleConfig()">
+                <i class="fa-solid fa-gear text-lg"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- 主体内容 -->
+    <main class="flex-1 flex overflow-hidden">
+        <!-- 左侧：架构可视化区域 -->
+        <section class="flex-1 flex flex-col p-6 overflow-y-auto relative bg-slate-50">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-slate-800"><i class="fa-solid fa-diagram-project mr-2 text-blue-600"></i>系统架构全景图</h2>
+                <div class="flex gap-2">
+                    <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow text-sm transition-all flex items-center gap-2" id="btn-start" onclick="startRealMigration()">
+                        <i class="fa-solid fa-play"></i> 开始迁移任务
+                    </button>
+                    <button class="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg shadow text-sm transition-all" onclick="resetSimulation()">
+                        <i class="fa-solid fa-rotate-right"></i> 重置
+                    </button>
+                    <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow text-sm transition-all" onclick="runSimulation()">
+                        <i class="fa-solid fa-vial"></i> 运行演示
+                    </button>
+                </div>
+            </div>
+
+            <!-- 架构图容器 -->
+            <div class="bg-white rounded-xl shadow-lg border border-slate-200 p-6 flex-1 flex flex-col justify-between relative overflow-hidden">
+                <!-- 背景网格装饰 -->
+                <div class="absolute inset-0 opacity-[0.03]" style="background-image: radial-gradient(#000 1px, transparent 1px); background-size: 20px 20px;"></div>
+
+                <!-- 层级结构 - 横向5列布局 -->
+                <div class="relative z-10 grid grid-cols-9 gap-2 h-full items-center">
+
+                    <!-- 1. 前端层 (UI Layer) -->
+                    <div class="col-span-2 flex flex-col gap-3 h-full justify-center" id="layer-ui">
+                        <div class="text-center text-xs font-bold text-blue-600 uppercase tracking-widest mb-2">① Frontend (UI)</div>
+                        <div class="arch-node bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 p-4 rounded-xl shadow-sm text-center cursor-pointer hover:shadow-md" onclick="showLayerDetail('ui')">
+                            <i class="fa-brands fa-windows text-3xl text-blue-600 mb-2"></i>
+                            <div class="font-bold text-sm text-slate-700">Tauri 桌面应用</div>
+                            <div class="text-xs text-slate-500 mt-1">FastAPI + WebSocket</div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-3 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-cloud-arrow-up text-blue-500"></i>
+                            <span>文件上传 (拖拽/选择)</span>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-3 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-gauge-high text-blue-500"></i>
+                            <span>实时进度面板</span>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-3 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-book text-blue-500"></i>
+                            <span>知识库模板选择</span>
+                        </div>
+                    </div>
+
+                    <!-- 连接器 1 -->
+                    <div class="flex justify-center items-center h-full">
+                        <div class="flow-line" id="line-1"></div>
+                    </div>
+
+                    <!-- 2. 文件处理层 (File Processing) -->
+                    <div class="col-span-2 flex flex-col gap-2 h-full justify-center" id="layer-file">
+                        <div class="text-center text-xs font-bold text-emerald-600 uppercase tracking-widest mb-2">② File Processing</div>
+                        <div class="arch-node bg-gradient-to-br from-emerald-50 to-emerald-100 border-2 border-emerald-200 p-3 rounded-xl shadow-sm">
+                            <div class="font-bold text-xs text-slate-700 mb-2 flex items-center gap-2">
+                                <i class="fa-solid fa-file-circle-check text-emerald-600"></i>
+                                <span>格式识别与分流</span>
+                            </div>
+                            <div class="flex flex-wrap gap-1">
+                                <span class="bg-white px-2 py-0.5 rounded text-[10px] border border-emerald-200">PDF</span>
+                                <span class="bg-white px-2 py-0.5 rounded text-[10px] border border-emerald-200">DOC</span>
+                                <span class="bg-white px-2 py-0.5 rounded text-[10px] border border-emerald-200">DOCX</span>
+                                <span class="bg-white px-2 py-0.5 rounded text-[10px] border border-emerald-200">XLS</span>
+                                <span class="bg-white px-2 py-0.5 rounded text-[10px] border border-emerald-200">XLSX</span>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-file-pdf text-red-500"></i>
+                            <div>
+                                <div class="font-medium">PDF → Markdown</div>
+                                <div class="text-[10px] text-slate-400">MinerU / Docling</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-file-word text-blue-500"></i>
+                            <div>
+                                <div class="font-medium">DOC → Markdown</div>
+                                <div class="text-[10px] text-slate-400">python-docx</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-table text-green-500"></i>
+                            <div>
+                                <div class="font-medium">Excel → JSON</div>
+                                <div class="text-[10px] text-slate-400">pandas</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 连接器 2 -->
+                    <div class="flex justify-center items-center h-full">
+                        <div class="flow-line" id="line-2"></div>
+                    </div>
+
+                    <!-- 3. LLM集成层 (LLM Integration) -->
+                    <div class="col-span-2 flex flex-col gap-2 h-full justify-center" id="layer-llm">
+                        <div class="text-center text-xs font-bold text-purple-600 uppercase tracking-widest mb-2">③ LLM Integration</div>
+                        <div class="arch-node bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-200 p-3 rounded-xl shadow-sm">
+                            <div class="font-bold text-xs text-slate-700 mb-1 flex items-center gap-2">
+                                <i class="fa-solid fa-robot text-purple-600"></i>
+                                <span>双层工作流控制器</span>
+                            </div>
+                            <div class="flex justify-between items-center text-[10px] text-slate-500 mt-1 px-1">
+                                <span>内容处理</span>
+                                <i class="fa-solid fa-arrow-right text-purple-400"></i>
+                                <span>质量审核</span>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-wand-magic-sparkles text-purple-500"></i>
+                            <div>
+                                <div class="font-medium">内容清洗 & 重写</div>
+                                <div class="text-[10px] text-slate-400">Markdown 格式化</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-tags text-purple-500"></i>
+                            <div>
+                                <div class="font-medium">智能分类 & 标签</div>
+                                <div class="text-[10px] text-slate-400">知识库位置推荐</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-check-double text-purple-500"></i>
+                            <div>
+                                <div class="font-medium">格式验证 (≥70分)</div>
+                                <div class="text-[10px] text-slate-400">不通过则返回重处理</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-plug text-purple-500"></i>
+                            <div>
+                                <div class="font-medium">Provider 适配器</div>
+                                <div class="text-[10px] text-slate-400">OpenAI / Claude / Qwen</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 连接器 3 -->
+                    <div class="flex justify-center items-center h-full">
+                        <div class="flow-line" id="line-3"></div>
+                    </div>
+
+                    <!-- 4. 飞书API适配层 (Feishu API) -->
+                    <div class="col-span-2 flex flex-col gap-2 h-full justify-center" id="layer-api">
+                        <div class="text-center text-xs font-bold text-orange-600 uppercase tracking-widest mb-2">④ Feishu API / MCP</div>
+                        <div class="arch-node bg-gradient-to-br from-orange-50 to-orange-100 border-2 border-orange-200 p-3 rounded-xl shadow-sm">
+                            <div class="font-bold text-xs text-slate-700 mb-1 flex items-center gap-2">
+                                <i class="fa-solid fa-shield-halved text-orange-600"></i>
+                                <span>Token & Auth Manager</span>
+                            </div>
+                            <div class="text-[10px] text-slate-500">tenant_access_token 自动刷新</div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-folder-plus text-orange-500"></i>
+                            <div>
+                                <div class="font-medium">创建知识空间/节点</div>
+                                <div class="text-[10px] text-slate-400">wiki/v2/spaces</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-file-circle-plus text-orange-500"></i>
+                            <div>
+                                <div class="font-medium">创建文档</div>
+                                <div class="text-[10px] text-slate-400">docx/v1/documents</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-code text-orange-500"></i>
+                            <div>
+                                <div class="font-medium">Blocks Convert</div>
+                                <div class="text-[10px] text-slate-400">Markdown → 飞书 Blocks</div>
+                            </div>
+                        </div>
+                        <div class="arch-node bg-white border border-slate-200 p-2.5 rounded-lg shadow-sm text-xs text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-image text-orange-500"></i>
+                            <div>
+                                <div class="font-medium">图片上传 & 替换</div>
+                                <div class="text-[10px] text-slate-400">drive/v1/medias</div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- 底部数据流指示 -->
+                <div class="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center text-xs text-slate-400">
+                    <div class="flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
+                        <span>数据流向: 本地文件扫描 → 格式转换 → LLM处理 → 飞书上传</span>
+                    </div>
+                    <div class="font-mono text-blue-600 font-medium" id="current-phase">等待开始...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 右侧：控制与监控面板 -->
+        <aside class="w-96 bg-white border-l border-slate-200 flex flex-col shadow-xl z-20">
+            <!-- Tab 切换 -->
+            <div class="flex border-b border-slate-200 overflow-x-auto">
+                <button class="flex-1 py-3 text-sm font-medium text-blue-600 border-b-2 border-blue-600 whitespace-nowrap" id="tab-monitor" onclick="switchTab('monitor')">
+                    <i class="fa-solid fa-chart-line mr-1"></i> 实时监控
+                </button>
+                <button class="flex-1 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap" id="tab-tasks" onclick="switchTab('tasks')">
+                    <i class="fa-solid fa-list-check mr-1"></i> 任务管理
+                </button>
+                <button class="flex-1 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap" id="tab-templates" onclick="switchTab('templates')">
+                    <i class="fa-solid fa-sitemap mr-1"></i> 模板管理
+                </button>
+                <button class="flex-1 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap" id="tab-config" onclick="switchTab('config')">
+                    <i class="fa-solid fa-sliders mr-1"></i> 配置
+                </button>
+            </div>
+
+            <!-- 监控面板内容 -->
+            <div class="flex-1 flex flex-col p-4 overflow-hidden" id="panel-monitor">
+                <!-- 进度概览 -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="font-bold text-slate-700">总进度</span>
+                        <span class="text-blue-600 font-mono" id="progress-text">0%</span>
+                    </div>
+                    <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                        <div class="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-300" id="progress-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- ECharts 图表 -->
+                <div class="h-40 w-full mb-4 border border-slate-100 rounded-lg bg-slate-50 p-2">
+                    <div class="w-full h-full" id="throughput-chart"></div>
+                </div>
+
+                <!-- 状态统计 -->
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <button class="text-left bg-gradient-to-br from-emerald-50 to-emerald-100 p-3 rounded-lg border border-emerald-100 hover:shadow-md transition-shadow" onclick="showStatusFilesModal('success')">
+                        <div class="text-xs text-slate-500">成功</div>
+                        <div class="text-xl font-bold text-emerald-600" id="status-success-count">0</div>
+                    </button>
+                    <!-- <button class="text-left bg-gradient-to-br from-amber-50 to-amber-100 p-3 rounded-lg border border-amber-100 hover:shadow-md transition-shadow" onclick="showStatusFilesModal('duplicate')">
+                        <div class="text-xs text-slate-500">重复</div>
+                        <div class="text-xl font-bold text-amber-600" id="status-duplicate-count">0</div>
+                    </button> -->
+                    <button class="text-left bg-gradient-to-br from-red-50 to-red-100 p-3 rounded-lg border border-red-100 hover:shadow-md transition-shadow" onclick="showStatusFilesModal('failed')">
+                        <div class="text-xs text-slate-500">失败</div>
+                        <div class="text-xl font-bold text-red-500" id="status-failed-count">0</div>
+                    </button>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div class="bg-gradient-to-br from-purple-50 to-purple-100 p-3 rounded-lg border border-purple-100">
+                        <div class="text-xs text-slate-500">LLM Token消耗</div>
+                        <div class="text-xl font-bold text-purple-600" id="stat-tokens">0</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-orange-50 to-orange-100 p-3 rounded-lg border border-orange-100">
+                        <div class="text-xs text-slate-500">API 调用次数</div>
+                        <div class="text-xl font-bold text-orange-600" id="stat-api">0</div>
+                    </div>
+                </div>
+
+                <!-- 日志终端 -->
+                <div class="flex-1 flex flex-col min-h-0">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-bold text-slate-600"><i class="fa-solid fa-terminal mr-1"></i>系统日志</span>
+                        <button class="text-xs text-slate-400 hover:text-slate-600" onclick="clearLogs()">清空</button>
+                    </div>
+                    <div class="terminal flex-1 rounded-lg p-3 overflow-y-auto text-xs shadow-inner" id="log-container">
+                        <div class="log-entry log-info">[System] 系统初始化完成。等待用户操作...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 任务管理面板 (默认隐藏) -->
+            <div class="flex-1 flex flex-col p-4 overflow-hidden hidden" id="panel-tasks">
+                <div class="mb-4 flex justify-between items-center">
+                    <h3 class="text-sm font-bold text-slate-700">迁移任务列表</h3>
+                    <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs" onclick="createNewTask()">
+                        <i class="fa-solid fa-plus mr-1"></i>新建任务
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto space-y-2" id="task-list">
+                    <!-- 任务列表将动态生成 -->
+                    <div class="text-center text-slate-400 text-sm py-8">
+                        <i class="fa-solid fa-inbox text-3xl mb-2"></i>
+                        <p>暂无任务</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 模板管理面板 (默认隐藏) -->
+            <div class="flex-1 flex flex-col p-4 overflow-hidden hidden" id="panel-templates">
+                <div class="mb-4 flex flex-col gap-2">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-sm font-bold text-slate-700">知识库模板管理</h3>
+                        <div class="flex gap-2">
+                            <select class="text-xs border border-slate-300 rounded-lg px-2 py-1" id="template-select-manage" onchange="onTemplateSelectChange()">
+                                <option value="">选择模板...</option>
+                            </select>
+                            <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs" onclick="createNewTemplate()">
+                                <i class="fa-solid fa-plus mr-1"></i>新建模板
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded text-xs flex items-center gap-2" onclick="triggerTemplateImportInput()">
+                            <i class="fa-solid fa-file-import"></i>导入 JSON 模板
+                        </button>
+                        <input type="file" id="template-import-input" class="hidden" accept=".json,application/json" onchange="handleTemplateImport(event)">
+                        <button class="bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 rounded text-xs flex items-center gap-2" onclick="exportCurrentTemplate()">
+                            <i class="fa-solid fa-file-arrow-down"></i>导出当前模板
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 模板详情编辑区 -->
+                <div id="template-edit-area" class="flex-1 flex flex-col overflow-hidden hidden">
+                    <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-3">
+                        <div class="space-y-2">
+                            <div>
+                                <label class="block text-xs text-slate-500 mb-1">模板名称</label>
+                                <input type="text" id="template-name-input" class="w-full text-sm border border-slate-300 rounded px-2 py-1" placeholder="模板名称">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-500 mb-1">模板描述</label>
+                                <input type="text" id="template-desc-input" class="w-full text-sm border border-slate-300 rounded px-2 py-1" placeholder="模板描述">
+                            </div>
+                            <div class="flex gap-2 pt-1">
+                                <button class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs" onclick="saveTemplateInfo()">
+                                    <i class="fa-solid fa-save mr-1"></i>保存
+                                </button>
+                                <button class="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs" onclick="deleteCurrentTemplate()">
+                                    <i class="fa-solid fa-trash mr-1"></i>删除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 树形结构编辑区 -->
+                    <div class="flex-1 flex gap-3 overflow-hidden">
+                        <div class="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-3 overflow-y-auto">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-xs font-medium text-slate-600">模板结构</span>
+                                <button class="text-xs text-blue-600 hover:text-blue-800" onclick="addRootNode()">
+                                    <i class="fa-solid fa-plus mr-1"></i>添加根节点
+                                </button>
+                            </div>
+                            <div id="template-tree-manage" class="text-sm">
+                                <!-- 动态生成 -->
+                            </div>
+                        </div>
+                        
+                        <!-- 节点操作区 -->
+                        <div class="w-64 bg-white border border-slate-200 rounded-lg p-3" id="node-edit-panel" style="display: none;">
+                            <h4 class="text-sm font-bold text-slate-700 mb-3">编辑节点</h4>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-xs text-slate-500 mb-1">节点名称</label>
+                                    <input type="text" id="node-name-input" class="w-full text-sm border border-slate-300 rounded px-2 py-1">
+                                </div>
+                                <div class="flex gap-2 pt-2">
+                                    <button class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded" onclick="saveNodeEdit()">
+                                        保存
+                                    </button>
+                                    <button class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs py-2 rounded" onclick="cancelNodeEdit()">
+                                        取消
+                                    </button>
+                                </div>
+                                <hr class="border-slate-200">
+                                <div class="space-y-2">
+                                    <button class="w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-xs py-2 rounded" onclick="addChildNode()">
+                                        <i class="fa-solid fa-plus mr-1"></i>添加子节点
+                                    </button>
+                                    <button class="w-full bg-red-100 hover:bg-red-200 text-red-700 text-xs py-2 rounded" onclick="deleteCurrentNode()">
+                                        <i class="fa-solid fa-trash mr-1"></i>删除节点
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="template-empty-state" class="flex-1 flex items-center justify-center text-slate-400">
+                    <div class="text-center">
+                        <i class="fa-solid fa-sitemap text-4xl mb-2"></i>
+                        <p>请选择一个模板或创建新模板</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置面板内容 (默认隐藏) -->
+            <div class="flex-1 flex flex-col p-4 overflow-y-auto hidden" id="panel-config">
+                <!-- 知识库框架预览 -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-sitemap text-blue-500"></i>
+                        知识库模板预览
+                    </h3>
+                    <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 h-48 overflow-y-auto text-xs">
+                        <div id="config-tree-root">
+                            <!-- JS 动态生成树 -->
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <select class="w-full text-xs border border-slate-300 rounded-lg p-2" id="template-select" onchange="onConfigTemplateChange()">
+                            <!-- 动态加载 -->
+                        </select>
+                    </div>
+                    <div class="mt-2 text-xs text-slate-500">
+                        <i class="fa-solid fa-circle-info mr-1"></i>
+                        在"模板管理"标签页可编辑模板结构
+                    </div>
+                </div>
+
+                <!-- LLM 参数配置 -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-brain text-purple-500"></i>
+                        LLM 配置
+                    </h3>
+                    <div class="space-y-3 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">Provider</label>
+                            <select class="w-full text-sm border border-slate-300 rounded-lg p-2 bg-white" id="llm-provider">
+                                <option value="deepseek">DeepSeek Chat</option>
+                                <option value="kimi">Kimi (Moonshot)</option>
+                                <option value="openai">OpenAI GPT-4</option>
+                                <option value="claude">Anthropic Claude 3</option>
+                                <option value="qwen">阿里云通义千问</option>
+                                <option value="ollama">本地 Ollama</option>
+                                <option value="mock">模拟模式(测试)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">API Key</label>
+                            <input class="w-full text-sm border border-slate-300 rounded-lg p-2 bg-white" id="llm-api-key" type="password" placeholder="输入API Key"/>
+                        </div>
+                        <!-- <div class="flex items-center justify-between">
+                            <span class="text-xs text-slate-600">启用双层审核</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" checked class="sr-only peer" id="llm-quality-check">
+                                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                        </div> -->
+                    </div>
+                </div>
+
+                <!-- 飞书 OAuth 授权 -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-key text-orange-500"></i>
+                        飞书账号授权
+                    </h3>
+                    <div class="space-y-3 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div id="auth-status-card" class="bg-white p-3 rounded border border-slate-200">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span id="auth-status-icon" class="text-red-500">
+                                    <i class="fa-solid fa-circle-xmark"></i>
+                                </span>
+                                <span id="auth-status-text" class="text-sm font-medium text-slate-700">未授权</span>
+                            </div>
+                            <p id="auth-expiry" class="text-xs text-slate-500">点击授权按钮登录飞书账号</p>
+                        </div>
+                        <button id="auth-btn" class="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded-lg" onclick="handleAuthClick()">
+                            <i class="fa-solid fa-right-to-bracket mr-1"></i>授权登录
+                        </button>
+                        <button id="auth-refresh-btn" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm py-2 rounded-lg hidden" onclick="refreshAuthToken()">
+                            <i class="fa-solid fa-rotate mr-1"></i>刷新授权
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 飞书配置 -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-paper-plane text-orange-500"></i>
+                        飞书 API 配置
+                    </h3>
+                    <div class="space-y-3 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">App ID</label>
+                            <input class="w-full text-sm border border-slate-300 rounded-lg p-2 bg-white" id="feishu-app-id" type="text" value=""/>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">App Secret</label>
+                            <input class="w-full text-sm border border-slate-300 rounded-lg p-2 bg-white" id="feishu-app-secret" type="password" value=""/>
+                        </div>
+                        <button class="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded-lg" onclick="testFeishuConnection()">
+                            <i class="fa-solid fa-link mr-1"></i>测试连接
+                        </button>
+                    </div>
+                </div>
+
+                <!-- MinerU 配置 -->
+                <div class="mb-6 hidden">
+                    <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-file-pdf text-red-500"></i>
+                        MinerU 配置
+                    </h3>
+                    <div class="space-y-3 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">使用方式</label>
+                            <select class="w-full text-sm border border-slate-300 rounded-lg p-2 bg-white" id="mineru-mode">
+                                <option value="local">本地 Docker 部署</option>
+                                <option value="cloud">MinerU 云服务 API</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">服务地址</label>
+                            <input class="w-full text-sm border border-slate-300 rounded-lg p-2 bg-white" id="mineru-url" type="text" value="http://localhost:8000"/>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium" id="save-config-btn" onclick="saveConfig()">
+                        <i class="fa-solid fa-save mr-1"></i>保存配置
+                    </button>
+                    <button class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 rounded-lg font-medium" id="clear-config-btn" onclick="clearConfig()">
+                        <i class="fa-solid fa-eraser mr-1"></i>清空配置
+                    </button>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- 新建任务弹窗 -->
+    <div class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50" id="new-task-modal">
+        <div class="bg-white rounded-xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center">
+                <h3 class="font-bold text-lg">新建迁移任务</h3>
+                <button class="text-slate-400 hover:text-slate-600" onclick="closeNewTaskModal()">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div class="p-4 flex-1 overflow-y-auto">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">任务名称</label>
+                        <input type="text" id="task-name" class="w-full border border-slate-300 rounded-lg p-2" placeholder="例如：产品知识库迁移"/>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">选择模板</label>
+                        <select id="task-template" class="w-full border border-slate-300 rounded-lg p-2">
+                            <!-- 动态加载 -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">上传文件</label>
+                        <div class="drop-zone rounded-lg p-8 text-center" id="drop-zone" 
+                             ondrop="handleDrop(event)" 
+                             ondragover="handleDragOver(event)" 
+                             ondragleave="handleDragLeave(event)">
+                            <i class="fa-solid fa-cloud-arrow-up text-4xl text-slate-300 mb-2"></i>
+                            <p class="text-slate-500">拖拽文件到此处，或 <span class="text-blue-600 cursor-pointer" onclick="document.getElementById('file-input').click()">点击选择</span></p>
+                            <p class="text-xs text-slate-400 mt-1">支持 DOC/DOCX、XLS/XLSX、CSV、TXT、MD、HTML、PPTX、XMind、FreeMind、OPML</p>
+                            <input type="file" id="file-input" multiple class="hidden" accept=".doc,.docx,.xls,.xlsx,.csv,.txt,.md,.markdown,.mark,.html,.pptx,.xmind,.mm,.opml" onchange="handleFileSelect(event)">
+                        </div>
+                    </div>
+                    <div id="file-list" class="space-y-2">
+                        <!-- 文件列表将在这里显示 -->
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-200 flex justify-end gap-2">
+                <button class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg" onclick="closeNewTaskModal()">取消</button>
+                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg" onclick="submitNewTask()">创建任务</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务详情弹窗 -->
+    <div class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50" id="task-detail-modal">
+        <div class="bg-white rounded-xl shadow-2xl w-[500px] max-h-[70vh] flex flex-col">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center">
+                <h3 class="font-bold text-lg">任务详情</h3>
+                <button class="text-slate-400 hover:text-slate-600" onclick="closeTaskDetailModal()">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div class="p-4 flex-1 overflow-y-auto" id="task-detail-content">
+                <!-- 任务详情内容 -->
+            </div>
+            <div class="p-4 border-t border-slate-200 flex justify-end gap-2" id="task-detail-actions">
+                <!-- 操作按钮 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 统一应用弹窗（替代 alert/confirm/prompt） -->
+    <div class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50" id="app-dialog-modal" onclick="handleAppDialogBackdrop(event)">
+        <div class="bg-white rounded-xl shadow-2xl w-[520px] max-w-[92vw] flex flex-col">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center">
+                <h3 class="font-bold text-lg" id="app-dialog-title">提示</h3>
+                <button class="text-slate-400 hover:text-slate-600" onclick="closeAppDialog(false)">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div class="p-4">
+                <p class="text-sm text-slate-700 whitespace-pre-wrap break-words" id="app-dialog-message"></p>
+                <div class="mt-4 hidden" id="app-dialog-input-wrap">
+                    <input type="text" id="app-dialog-input" class="w-full border border-slate-300 rounded-lg p-2 text-sm" />
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-200 flex justify-end gap-2">
+                <button class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg hidden" id="app-dialog-cancel" onclick="closeAppDialog(false)">取消</button>
+                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg" id="app-dialog-ok" onclick="closeAppDialog(true)">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文件状态明细弹窗 -->
+    <div class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50" id="status-files-modal">
+        <div class="bg-white rounded-xl shadow-2xl w-[640px] max-w-[92vw] flex flex-col">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center">
+                <h3 class="font-bold text-lg" id="status-files-title">文件列表</h3>
+                <button class="text-slate-400 hover:text-slate-600" onclick="closeStatusFilesModal()">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div class="p-4">
+                <div class="max-h-[50vh] overflow-y-auto border border-slate-200 rounded-lg p-2 bg-slate-50" id="status-files-content">
+                    <div class="text-sm text-slate-400 text-center py-4">暂无数据</div>
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-200 flex justify-end">
+                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg" onclick="closeStatusFilesModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript 逻辑 -->
+    <script>
+        // --- 全局变量 ---
+        const API_BASE = 'http://127.0.0.1:8000';
+        let ws = null;
+        let currentTaskId = null;
+        let selectedFiles = [];
+        let tasks = [];
+        let appDialogResolver = null;
+        let appDialogMode = 'alert';
+        let llmApiKeyMap = {};
+        const providersWithoutApiKey = new Set(['ollama', 'mock']);
+        let authCountdownTimer = null;
+        let authPopupWindow = null;
+        let feishuConfigState = { hasSavedAppId: false, hasSavedAppSecret: false, maskedAppId: '' };
+        let latestFileStatusList = [];
+        let statusFileNameMap = { success: [], duplicate: [], failed: [] };
+
+        // 知识库模板数据
+        const templateData = {
+            product_kb: [
+                {
+                    name: "00-新手入门与团队规范", type: "folder", children: [
+                        { name: "01-新员工30天学习路径", type: "folder", children: [
+                            { name: "【置顶】第一天必读：知识库使用指南", type: "doc" },
+                            { name: "第一周：产品入门（CMP/MaxKB/Cordys）", type: "doc" },
+                            { name: "第二周：开发环境搭建", type: "doc" },
+                            { name: "第三周：交付流程实战", type: "doc" }
+                        ]},
+                        { name: "02-开发规范与工具", type: "folder", children: [
+                            { name: "代码规范（Java/Go/前端）", type: "doc" },
+                            { name: "Git提交规范", type: "doc" },
+                            { name: "常用工具清单（含账号权限）", type: "doc" }
+                        ]},
+                        { name: "03-项目交付标准流程", type: "folder", children: [
+                            { name: "交付checklist", type: "doc" },
+                            { name: "验收标准模板", type: "doc" },
+                            { name: "客户沟通注意事项", type: "doc" }
+                        ]},
+                        { name: "04-常用模板", type: "folder", children: [
+                            { name: "问题记录模板（三两句话版）", type: "doc" },
+                            { name: "技术分享模板", type: "doc" },
+                            { name: "项目复盘模板", type: "doc" }
+                        ]}
+                    ]
+                },
+                {
+                    name: "01-产品知识库", type: "folder", children: [
+                        { name: "CMP（多云管理平台）", type: "folder", children: [
+                            { name: "01-交付实施", type: "folder", children: [
+                                { name: "标准部署手册", type: "doc" },
+                                { name: "环境要求与检查", type: "doc" },
+                                { name: "常见报错及解决（按错误码分类）", type: "doc" }
+                            ]},
+                            { name: "02-二次开发", type: "folder", children: [
+                                { name: "API接口文档", type: "doc" },
+                                { name: "定制化开发指南", type: "doc" },
+                                { name: "【开发小坑】持续更新", type: "doc" }
+                            ]},
+                            { name: "03-解决方案", type: "folder", children: [
+                                { name: "典型客户场景", type: "doc" },
+                                { name: "方案模板", type: "doc" }
+                            ]}
+                        ]},
+                        { name: "MaxKB（知识库工具）", type: "folder", children: [
+                            { name: "01-部署与运维", type: "doc" },
+                            { name: "02-API与集成", type: "doc" },
+                            { name: "03-常见问题", type: "doc" }
+                        ]},
+                        { name: "Cordys（低代码平台）", type: "folder", children: [
+                            { name: "01-开发指南", type: "doc" },
+                            { name: "02-常见问题", type: "doc" }
+                        ]}
+                    ]
+                }
+            ],
+            tech_kb: [
+                { name: "00-技术规范", type: "folder", children: [
+                    { name: "编码规范", type: "doc" },
+                    { name: "架构设计规范", type: "doc" },
+                    { name: "代码审查规范", type: "doc" }
+                ]},
+                { name: "01-开发文档", type: "folder", children: [
+                    { name: "后端开发", type: "folder", children: [
+                        { name: "API设计", type: "doc" },
+                        { name: "数据库设计", type: "doc" },
+                        { name: "接口文档", type: "doc" }
+                    ]},
+                    { name: "前端开发", type: "folder", children: [
+                        { name: "组件库", type: "doc" },
+                        { name: "页面规范", type: "doc" }
+                    ]},
+                    { name: "移动端开发", type: "folder", children: [
+                        { name: "Android", type: "doc" },
+                        { name: "iOS", type: "doc" }
+                    ]}
+                ]},
+                { name: "02-运维文档", type: "folder", children: [
+                    { name: "部署手册", type: "doc" },
+                    { name: "监控告警", type: "doc" },
+                    { name: "故障处理", type: "doc" },
+                    { name: "应急预案", type: "doc" }
+                ]},
+                { name: "03-技术分享", type: "folder", children: [
+                    { name: "技术博客", type: "doc" },
+                    { name: "最佳实践", type: "doc" },
+                    { name: "踩坑记录", type: "doc" }
+                ]}
+            ],
+            hr_kb: [
+                { name: "00-入职指南", type: "folder", children: [
+                    { name: "新员工手册", type: "doc" },
+                    { name: "入职流程", type: "doc" },
+                    { name: "公司制度", type: "doc" }
+                ]},
+                { name: "01-员工手册", type: "folder", children: [
+                    { name: "考勤制度", type: "doc" },
+                    { name: "薪酬福利", type: "doc" },
+                    { name: "绩效考核", type: "doc" },
+                    { name: "晋升通道", type: "doc" }
+                ]},
+                { name: "02-培训资料", type: "folder", children: [
+                    { name: "新员工培训", type: "doc" },
+                    { name: "管理培训", type: "doc" },
+                    { name: "专业技能培训", type: "doc" }
+                ]},
+                { name: "03-行政事务", type: "folder", children: [
+                    { name: "请假流程", type: "doc" },
+                    { name: "报销流程", type: "doc" },
+                    { name: "办公用品申请", type: "doc" }
+                ]}
+            ]
+        };
+        
+        // 当前显示的知识库树形数据
+        let knowledgeTreeData = templateData.product_kb;
+
+        function showAppDialog({ title = '提示', message = '', mode = 'alert', defaultValue = '' }) {
+            return new Promise((resolve) => {
+                appDialogResolver = resolve;
+                appDialogMode = mode;
+
+                const modal = document.getElementById('app-dialog-modal');
+                const titleEl = document.getElementById('app-dialog-title');
+                const messageEl = document.getElementById('app-dialog-message');
+                const inputWrap = document.getElementById('app-dialog-input-wrap');
+                const inputEl = document.getElementById('app-dialog-input');
+                const cancelBtn = document.getElementById('app-dialog-cancel');
+                const okBtn = document.getElementById('app-dialog-ok');
+
+                titleEl.textContent = title;
+                messageEl.textContent = message;
+                okBtn.textContent = mode === 'prompt' ? '提交' : '确定';
+
+                if (mode === 'prompt') {
+                    inputWrap.classList.remove('hidden');
+                    inputEl.value = defaultValue || '';
+                    setTimeout(() => inputEl.focus(), 30);
+                } else {
+                    inputWrap.classList.add('hidden');
+                    inputEl.value = '';
+                }
+
+                cancelBtn.textContent = mode === 'alert' ? '关闭' : '取消';
+                if (mode === 'confirm' || mode === 'prompt' || mode === 'alert') {
+                    cancelBtn.classList.remove('hidden');
+                } else {
+                    cancelBtn.classList.add('hidden');
+                }
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            });
+        }
+
+        function handleAppDialogBackdrop(event) {
+            if (event?.target?.id !== 'app-dialog-modal') {
+                return;
+            }
+            closeAppDialog(false);
+        }
+
+        function closeAppDialog(confirmed) {
+            const modal = document.getElementById('app-dialog-modal');
+            const inputEl = document.getElementById('app-dialog-input');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+
+            if (!appDialogResolver) return;
+            const resolver = appDialogResolver;
+            appDialogResolver = null;
+
+            if (appDialogMode === 'alert') {
+                resolver(true);
+                return;
+            }
+            if (appDialogMode === 'confirm') {
+                resolver(Boolean(confirmed));
+                return;
+            }
+            if (appDialogMode === 'prompt') {
+                resolver(confirmed ? inputEl.value.trim() : null);
+            }
+        }
+
+        async function appAlert(message, title = '提示') {
+            await showAppDialog({ title, message, mode: 'alert' });
+        }
+
+        async function appConfirm(message, title = '确认') {
+            return await showAppDialog({ title, message, mode: 'confirm' });
+        }
+
+        async function appPrompt(message, title = '输入', defaultValue = '') {
+            return await showAppDialog({ title, message, mode: 'prompt', defaultValue });
+        }
+
+        function escapeHtml(text) {
+            return String(text || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function updateFileStatusSummary(fileStatus = []) {
+            latestFileStatusList = Array.isArray(fileStatus) ? fileStatus : [];
+
+            const grouped = { success: [], duplicate: [], failed: [] };
+            latestFileStatusList.forEach(item => {
+                if (!item || !item.name) return;
+                if (item.status === 'success') grouped.success.push(item.name);
+                if (item.status === 'duplicate') grouped.duplicate.push(item.name);
+                if (item.status === 'failed' || item.status === 'partial') grouped.failed.push(item.name);
+            });
+            statusFileNameMap = grouped;
+
+            document.getElementById('status-success-count').innerText = grouped.success.length;
+            document.getElementById('status-duplicate-count').innerText = grouped.duplicate.length;
+            document.getElementById('status-failed-count').innerText = grouped.failed.length;
+        }
+
+        function showStatusFilesModal(status) {
+            const titleMap = {
+                success: '成功文件列表',
+                duplicate: '重复文件列表',
+                failed: '失败文件列表'
+            };
+            const names = statusFileNameMap[status] || [];
+            const modal = document.getElementById('status-files-modal');
+            const titleEl = document.getElementById('status-files-title');
+            const contentEl = document.getElementById('status-files-content');
+
+            titleEl.textContent = `${titleMap[status] || '文件列表'}（${names.length}）`;
+            if (names.length === 0) {
+                contentEl.innerHTML = '<div class="text-sm text-slate-400 text-center py-4">暂无文件</div>';
+            } else {
+                contentEl.innerHTML = names
+                    .map(name => `<div class="text-sm text-slate-700 py-2 px-2 border-b border-slate-200 last:border-b-0">${escapeHtml(name)}</div>`)
+                    .join('');
+            }
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeStatusFilesModal() {
+            const modal = document.getElementById('status-files-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // --- 初始化 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM 加载完成，开始初始化...');
+            try {
+                // 初始化图表（监控面板）
+                initChart();
+                console.log('图表初始化完成');
+                
+                // 初始化 WebSocket
+                initWebSocket();
+                console.log('WebSocket 初始化完成');
+                
+                // 加载系统状态
+                loadSystemStatus();
+                console.log('系统状态加载完成');
+                
+                // 加载任务列表
+                loadTasks();
+                console.log('任务列表加载完成');
+                
+                // 加载模板选项
+                loadTemplatesForSelect();
+                console.log('模板选择加载完成');
+                
+                addLog('System', '系统初始化完成', 'info');
+                console.log('所有初始化完成');
+            } catch (error) {
+                console.error('初始化错误:', error);
+                appAlert('页面初始化失败: ' + error.message);
+            }
+        });
+
+        // 加载模板到新建任务下拉框
+        async function loadTemplatesForSelect() {
+            try {
+                const templates = await apiCall('GET', '/api/templates');
+                const select = document.getElementById('task-template');
+                const currentValue = select.value;
+                let html = '';
+                if (templates.length === 0) {
+                    html = '<option value="">暂无模板，请先创建模板</option>';
+                } else {
+                    templates.forEach(t => {
+                        html += `<option value="${t.id}">${t.name}</option>`;
+                    });
+                }
+                select.innerHTML = html;
+                if (currentValue && templates.find(t => t.id === currentValue)) {
+                    select.value = currentValue;
+                } else if (templates.length > 0) {
+                    select.value = templates[0].id;
+                }
+                return templates;
+            } catch (e) {
+                console.error('加载模板列表失败:', e);
+                return [];
+            }
+        }
+
+        // 加载模板到配置页面
+        async function loadTemplatesForConfig() {
+            try {
+                const templates = await apiCall('GET', '/api/templates');
+                
+                // 更新下拉框
+                const select = document.getElementById('template-select');
+                const currentValue = select.value;
+                
+                let html = '';
+                templates.forEach(t => {
+                    html += `<option value="${t.id}">${t.name}</option>`;
+                });
+                select.innerHTML = html;
+                
+                // 恢复选择或默认第一个
+                if (currentValue && templates.find(t => t.id === currentValue)) {
+                    select.value = currentValue;
+                } else if (templates.length > 0) {
+                    select.value = templates[0].id;
+                }
+                
+                // 加载当前选中模板的树形结构
+                await onConfigTemplateChange();
+            } catch (e) {
+                console.error('加载配置页面模板失败:', e);
+            }
+        }
+
+        // 配置页面模板切换
+        async function onConfigTemplateChange() {
+            const select = document.getElementById('template-select');
+            const templateId = select.value;
+            
+            if (!templateId) {
+                document.getElementById('config-tree-root').innerHTML = '<div class="text-slate-400 text-center py-4">请选择模板</div>';
+                return;
+            }
+            
+            try {
+                // 从后端获取最新模板数据
+                const template = await apiCall('GET', `/api/templates/${templateId}`);
+                
+                // 渲染树形结构到配置页面
+                renderConfigTree(template.structure || []);
+                
+                // 同时更新前端全局数据
+                templateData[templateId] = template.structure || [];
+                if (select.value === document.getElementById('template-select-manage')?.value) {
+                    knowledgeTreeData = templateData[templateId];
+                }
+            } catch (e) {
+                console.error('加载模板详情失败:', e);
+                document.getElementById('config-tree-root').innerHTML = '<div class="text-red-400 text-center py-4">加载失败</div>';
+            }
+        }
+
+        // 渲染配置页面的树
+        function renderConfigTree(nodes) {
+            const container = document.getElementById('config-tree-root');
+            container.innerHTML = '';
+            
+            if (!nodes || nodes.length === 0) {
+                container.innerHTML = '<div class="text-slate-400 text-center py-4">暂无内容</div>';
+                return;
+            }
+            
+            function buildTree(nodes, parentEl, level = 0) {
+                nodes.forEach(node => {
+                    const nodeEl = document.createElement('div');
+                    nodeEl.className = 'tree-node';
+                    
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'tree-item text-slate-700 py-1';
+                    
+                    const indent = '&nbsp;&nbsp;'.repeat(level);
+                    const icon = node.type === 'folder' 
+                        ? '<i class="fa-regular fa-folder text-yellow-500"></i>' 
+                        : '<i class="fa-regular fa-file-lines text-blue-400"></i>';
+                    
+                    itemEl.innerHTML = `${indent}${icon} <span>${node.name}</span>`;
+                    
+                    nodeEl.appendChild(itemEl);
+                    
+                    if (node.children && node.children.length > 0) {
+                        buildTree(node.children, nodeEl, level + 1);
+                    }
+                    parentEl.appendChild(nodeEl);
+                });
+            }
+            
+            buildTree(nodes, container);
+        }
+
+        // --- WebSocket连接 ---
+        function initWebSocket() {
+            const wsUrl = API_BASE.replace('http', 'ws') + '/ws';
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                addLog('WebSocket', '连接已建立', 'success');
+                document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-green-500';
+                document.getElementById('status-text').innerText = '已连接';
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            };
+            
+            ws.onclose = () => {
+                addLog('WebSocket', '连接已断开', 'warn');
+                document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-red-500';
+                document.getElementById('status-text').innerText = '未连接';
+                // 3秒后重连
+                setTimeout(initWebSocket, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                addLog('WebSocket', '连接错误', 'error');
+            };
+        }
+
+        // 图表数据历史记录（用于计算吞吐量）
+        let chartDataHistory = [];
+        let lastProcessedCount = 0;
+        let lastChartUpdateTime = Date.now();
+        
+        // API调用次数跟踪（用于计算吞吐量）
+        let lastApiCount = 0;
+        let lastApiUpdateTime = Date.now();
+
+        function handleWebSocketMessage(message) {
+            switch(message.type) {
+                case 'log':
+                    addLog(message.data.source, message.data.message, message.data.level);
+                    // 根据日志来源激活对应的架构层
+                    activateLayerByLogSource(message.data.source);
+                    break;
+                case 'progress':
+                    updateProgress(message.data.progress);
+                    document.getElementById('current-phase').innerText = message.data.phase;
+                    break;
+                case 'stats':
+                    updateStats(
+                        message.data.processed,
+                        message.data.failed,
+                        message.data.tokens,
+                        message.data.api,
+                        message.data.duplicate || 0
+                    );
+                    break;
+                case 'chart':
+                    // 处理后端发送的图表数据
+                    if (message.data.chart_type === 'line' && throughputChart) {
+                        updateChartWithRealData(message.data.data);
+                    }
+                    break;
+                case 'panorama':
+                    // 全景图数据更新，可以在这里添加动画效果
+                    updatePanoramaAnimation(message.data);
+                    break;
+                case 'status':
+                    document.getElementById('status-text').innerText = message.data.status;
+                    break;
+            }
+        }
+
+        // 根据日志来源自动激活对应的架构层
+        function activateLayerByLogSource(source) {
+            const sourceMap = {
+                'Upload': { layer: 'layer-ui', line: 'line-1' },
+                'Frontend': { layer: 'layer-ui', line: 'line-1' },
+                'Converter': { layer: 'layer-file', line: 'line-2' },
+                'Import': { layer: 'layer-file', line: 'line-2' },
+                'LLM': { layer: 'layer-llm', line: 'line-3' },
+                'Feishu': { layer: 'layer-api', line: null },
+                'Task': { layer: null, line: null }
+            };
+            
+            const mapping = sourceMap[source];
+            if (mapping) {
+                activateLayerWithFlow(mapping.layer, mapping.line);
+            }
+        }
+
+        // 激活层并添加流动效果
+        function activateLayerWithFlow(layerId, lineId) {
+            // 先清除所有激活状态
+            document.querySelectorAll('.arch-node').forEach(el => {
+                el.classList.remove('active', 'pulsing');
+            });
+            document.querySelectorAll('.flow-line').forEach(el => {
+                el.classList.remove('active', 'flowing');
+            });
+
+            // 激活指定的层
+            if (layerId) {
+                const layer = document.getElementById(layerId);
+                if (layer) {
+                    layer.querySelectorAll('.arch-node').forEach(el => {
+                        el.classList.add('active', 'pulsing');
+                    });
+                }
+            }
+            
+            // 激活流动线条
+            if (lineId) {
+                const line = document.getElementById(lineId);
+                if (line) {
+                    line.classList.add('active', 'flowing');
+                }
+            }
+        }
+
+        // 使用后端发送的图表数据更新
+        function updateChartWithRealData(data) {
+            if (!throughputChart || !data || !Array.isArray(data)) return;
+            
+            const option = throughputChart.getOption();
+            if (option && option.series && option.series[0]) {
+                // 提取数据点
+                const values = data.map(d => d.y || 0);
+                const labels = data.map(d => d.label || '');
+                
+                option.xAxis[0].data = labels.length > 0 ? labels : ['1', '2', '3', '4', '5', '6'];
+                option.series[0].data = values.length > 0 ? values : [0, 0, 0, 0, 0, 0];
+                throughputChart.setOption(option);
+            }
+        }
+
+        // 全景图动画更新
+        function updatePanoramaAnimation(data) {
+            // 根据文件处理状态添加动态效果
+            if (data.file_status && Array.isArray(data.file_status)) {
+                updateFileStatusSummary(data.file_status);
+                const processing = data.file_status.filter(f => f.status === 'processing').length;
+                const pending = data.file_status.filter(f => f.status === 'pending').length;
+                const success = data.file_status.filter(f => f.status === 'success').length;
+                
+                // 根据处理状态决定流动速度
+                const flowSpeed = processing > 0 ? '1s' : '3s';
+                document.querySelectorAll('.flow-line.flowing').forEach(el => {
+                    el.style.setProperty('--flow-speed', flowSpeed);
+                });
+            }
+        }
+
+        // --- API调用 ---
+        async function apiCall(method, endpoint, body = null) {
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (body) options.body = JSON.stringify(body);
+            
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, options);
+                if (!response.ok) {
+                    let message = `HTTP ${response.status}`;
+                    const contentType = response.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        try {
+                            const errorData = await response.json();
+                            message = errorData?.detail || errorData?.message || message;
+                        } catch (_) {
+                        }
+                    } else {
+                        try {
+                            const text = await response.text();
+                            if (text) {
+                                message = text;
+                            }
+                        } catch (_) {
+                        }
+                    }
+                    throw new Error(message);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('API调用失败:', error);
+                throw error;
+            }
+        }
+
+        async function loadSystemStatus() {
+            try {
+                const status = await apiCall('GET', '/api/status');
+                updateStats(
+                    status.stats.processed,
+                    status.stats.failed,
+                    status.stats.tokens,
+                    status.stats.api_calls,
+                    status.stats.duplicate || 0
+                );
+            } catch (e) {
+                addLog('System', '无法连接到后端服务', 'error');
+            }
+        }
+
+        async function loadTasks() {
+            try {
+                tasks = await apiCall('GET', '/api/tasks');
+                renderTaskList();
+            } catch (e) {
+                console.error('加载任务失败:', e);
+            }
+        }
+
+        function renderTaskList() {
+            const container = document.getElementById('task-list');
+            if (tasks.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-slate-400 text-sm py-8">
+                        <i class="fa-solid fa-inbox text-3xl mb-2"></i>
+                        <p>暂无任务</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = tasks.map(task => `
+                <div class="task-item bg-slate-50 border border-slate-200 rounded-lg p-3 cursor-pointer" onclick="showTaskDetail('${task.id}')">
+                    <div class="flex justify-between items-start mb-1">
+                        <span class="font-medium text-sm text-slate-800">${task.name}</span>
+                        <span class="text-xs px-2 py-0.5 rounded ${getStatusClass(task.status)}">${getStatusText(task.status)}</span>
+                    </div>
+                    <div class="text-xs text-slate-500">${task.files?.length || 0} 个文件</div>
+                    <div class="mt-2 w-full bg-slate-200 rounded-full h-1.5">
+                        <div class="bg-blue-500 h-1.5 rounded-full transition-all" style="width: ${task.progress || 0}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getStatusClass(status) {
+            const classes = {
+                'pending': 'bg-slate-200 text-slate-600',
+                'running': 'bg-blue-100 text-blue-600',
+                'completed': 'bg-green-100 text-green-600',
+                'error': 'bg-red-100 text-red-600',
+                'cancelled': 'bg-gray-100 text-gray-600'
+            };
+            return classes[status] || classes['pending'];
+        }
+
+        function getStatusText(status) {
+            const texts = {
+                'pending': '待处理',
+                'running': '进行中',
+                'completed': '已完成',
+                'error': '失败',
+                'cancelled': '已取消'
+            };
+            return texts[status] || status;
+        }
+
+        // --- 树形结构渲染 ---
+        function renderTree(data = null, containerId = 'tree-root') {
+            const container = document.getElementById(containerId);
+            
+            // 如果元素不存在，静默返回（可能面板还没显示）
+            if (!container) {
+                console.log(`树形容器 ${containerId} 不存在，跳过渲染`);
+                return;
+            }
+            
+            container.innerHTML = ''; // 清空现有内容
+            
+            const treeData = data || knowledgeTreeData;
+            
+            if (!treeData || treeData.length === 0) {
+                container.innerHTML = '<div class="text-slate-400 text-center py-4">暂无数据</div>';
+                return;
+            }
+            
+            function buildTree(nodes, parentEl) {
+                nodes.forEach(node => {
+                    const nodeEl = document.createElement('div');
+                    nodeEl.className = 'tree-node';
+                    
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'tree-item text-slate-700 hover:text-blue-600 cursor-pointer transition-colors';
+                    
+                    const icon = node.type === 'folder' 
+                        ? '<i class="fa-regular fa-folder text-yellow-500"></i>' 
+                        : '<i class="fa-regular fa-file-lines text-blue-400"></i>';
+                    itemEl.innerHTML = `${icon} <span>${node.name}</span>`;
+                    
+                    nodeEl.appendChild(itemEl);
+                    
+                    if (node.children) {
+                        buildTree(node.children, nodeEl);
+                    }
+                    parentEl.appendChild(nodeEl);
+                });
+            }
+            buildTree(treeData, container);
+        }
+
+        // --- ECharts 初始化 ---
+        let throughputChart;
+        function initChart() {
+            const chartDom = document.getElementById('throughput-chart');
+            throughputChart = echarts.init(chartDom);
+            
+            // 初始化空数据数组
+            chartDataHistory = new Array(20).fill(0);
+            
+            const option = {
+                title: { 
+                    text: '实时处理吞吐量 (文件/秒)', 
+                    left: 'center', 
+                    textStyle: { fontSize: 10, color: '#64748b' } 
+                },
+                tooltip: { 
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        return `时间: ${params[0].name}<br/>吞吐量: ${params[0].value.toFixed(2)} 文件/秒`;
+                    }
+                },
+                grid: { top: '25%', bottom: '15%', left: '15%', right: '10%' },
+                xAxis: { 
+                    type: 'category', 
+                    data: Array.from({length: 20}, (_, i) => `${i + 1}s`),
+                    axisLine: { lineStyle: { color: '#cbd5e1' } },
+                    axisLabel: { fontSize: 9 }
+                },
+                yAxis: { 
+                    type: 'value',
+                    min: 0,
+                    splitLine: { lineStyle: { type: 'dashed', color: '#e2e8f0' } },
+                    axisLabel: { fontSize: 9 }
+                },
+                series: [{
+                    name: '吞吐量',
+                    data: chartDataHistory,
+                    type: 'line',
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: 4,
+                    areaStyle: { 
+                        opacity: 0.3, 
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: '#3b82f6' },
+                            { offset: 1, color: '#60a5fa' }
+                        ])
+                    },
+                    lineStyle: { 
+                        color: '#3b82f6', 
+                        width: 2,
+                        shadowColor: 'rgba(59, 130, 246, 0.5)',
+                        shadowBlur: 10
+                    },
+                    itemStyle: {
+                        color: '#3b82f6'
+                    }
+                }]
+            };
+            throughputChart.setOption(option);
+            window.addEventListener('resize', () => throughputChart.resize());
+        }
+
+        // 图表模拟数据（在没有真实数据时显示波动效果）
+        let chartSimulationInterval = null;
+        let simulationModeActive = false;
+        function startChartSimulation() {
+            if (!simulationModeActive) return;
+            if (chartSimulationInterval) clearInterval(chartSimulationInterval);
+            
+            chartSimulationInterval = setInterval(() => {
+                // 如果有真实任务在运行，使用真实数据；否则显示模拟波动
+                const isTaskRunning = currentTaskId && document.getElementById('current-phase').innerText !== '等待开始...';
+                
+                if (!isTaskRunning) {
+                    // 生成模拟波动数据
+                    const baseValue = Math.random() * 2;
+                    const noise = (Math.random() - 0.5) * 1;
+                    const value = Math.max(0, baseValue + noise);
+                    
+                    chartDataHistory.push(value);
+                    chartDataHistory.shift();
+                    
+                    const option = throughputChart.getOption();
+                    if (option && option.series && option.series[0]) {
+                        option.series[0].data = chartDataHistory;
+                        throughputChart.setOption(option);
+                    }
+                }
+            }, 1000);
+        }
+
+        // --- 交互逻辑 ---
+        function switchTab(tab) {
+            ['monitor', 'tasks', 'templates', 'config'].forEach(t => {
+                document.getElementById(`panel-${t}`).classList.add('hidden');
+                const tabEl = document.getElementById(`tab-${t}`);
+                if (tabEl) {
+                    tabEl.classList.remove('text-blue-600', 'border-b-2', 'border-blue-600');
+                    tabEl.classList.add('text-slate-500');
+                }
+            });
+
+            document.getElementById(`panel-${tab}`).classList.remove('hidden');
+            const activeTabEl = document.getElementById(`tab-${tab}`);
+            if (activeTabEl) {
+                activeTabEl.classList.add('text-blue-600', 'border-b-2', 'border-blue-600');
+                activeTabEl.classList.remove('text-slate-500');
+            }
+            
+            if (tab === 'tasks') loadTasks();
+            if (tab === 'templates') loadTemplatesForManage();
+            if (tab === 'config') loadTemplatesForConfig();
+        }
+
+        function toggleConfig() {
+            switchTab('config');
+        }
+
+        function addLog(source, message, type = 'info') {
+            const container = document.getElementById('log-container');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            entry.innerText = `[${time}] [${source}] ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+            
+            // 限制日志数量
+            while (container.children.length > 500) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('log-container').innerHTML = '';
+            addLog('System', '日志已清空', 'info');
+        }
+
+        function updateStats(processed, failed, tokens, api, duplicate = 0) {
+            // 未收到全景文件状态前，先用后端统计值作为默认显示
+            if (!latestFileStatusList || latestFileStatusList.length === 0) {
+                document.getElementById('status-success-count').innerText = processed || 0;
+                document.getElementById('status-duplicate-count').innerText = duplicate || 0;
+                document.getElementById('status-failed-count').innerText = failed || 0;
+            }
+            document.getElementById('stat-tokens').innerText = (tokens || 0).toLocaleString();
+            document.getElementById('stat-api').innerText = api || 0;
+            
+            // 基于API调用次数计算吞吐量并更新图表
+            updateThroughputByApiCount(api || 0);
+        }
+        
+        // 基于API调用次数计算吞吐量（更真实的指标）
+        function updateThroughputByApiCount(apiCount) {
+            if (!throughputChart) return;
+            
+            const now = Date.now();
+            const timeDiff = (now - lastApiUpdateTime) / 1000; // 秒
+            
+            if (timeDiff >= 0.5) { // 每0.5秒更新一次，更灵敏
+                const apiDiff = apiCount - lastApiCount;
+                // 吞吐量 = API调用次数/秒，再除以3（因为每个文件大约产生3-4个API调用）
+                const throughput = apiDiff > 0 ? (apiDiff / timeDiff / 3) : 0;
+                
+                // 添加到历史数据（限制最大值避免异常值）
+                const clampedThroughput = Math.min(throughput, 20); // 最大20文件/秒
+                chartDataHistory.push(clampedThroughput);
+                if (chartDataHistory.length > 20) {
+                    chartDataHistory.shift();
+                }
+                
+                // 更新图表
+                const option = throughputChart.getOption();
+                if (option && option.series && option.series[0]) {
+                    // 生成时间标签
+                    const labels = chartDataHistory.map((_, i) => `${i + 1}`);
+                    
+                    option.xAxis[0].data = labels;
+                    option.series[0].data = chartDataHistory;
+                    throughputChart.setOption(option);
+                }
+                
+                lastApiCount = apiCount;
+                lastApiUpdateTime = now;
+            }
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progress-bar').style.width = `${percent}%`;
+            document.getElementById('progress-text').innerText = `${percent}%`;
+        }
+
+        function activateLayer(layerId, lineId) {
+            document.querySelectorAll('.arch-node').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.flow-line').forEach(el => el.classList.remove('active'));
+
+            if(layerId) {
+                const layer = document.getElementById(layerId);
+                if(layer) {
+                    layer.querySelectorAll('.arch-node').forEach(el => el.classList.add('active'));
+                }
+            }
+            if(lineId) {
+                document.getElementById(lineId).classList.add('active');
+            }
+        }
+
+        function showLayerDetail(layer) {
+            const details = {
+                'ui': '前端层：负责用户交互、文件上传、进度展示',
+                'file': '文件处理层：格式识别、PDF/DOC/Excel转换',
+                'llm': 'LLM集成层：内容清洗、智能分类、质量审核',
+                'api': '飞书API层：文档创建、Blocks转换、图片上传'
+            };
+            addLog('System', details[layer] || '未知层级', 'info');
+        }
+
+        // --- 任务管理 ---
+        async function createNewTask() {
+            const templates = await loadTemplatesForSelect();
+            if (!templates || templates.length === 0) {
+                await appAlert('请先在“模板管理”中创建模板');
+                return;
+            }
+            selectedFiles = [];
+            document.getElementById('task-name').value = '';
+            document.getElementById('file-list').innerHTML = '';
+            const fileInput = document.getElementById('file-input');
+            if (fileInput) fileInput.value = '';
+            document.getElementById('new-task-modal').classList.remove('hidden');
+            document.getElementById('new-task-modal').classList.add('flex');
+        }
+
+        function closeNewTaskModal() {
+            document.getElementById('new-task-modal').classList.add('hidden');
+            document.getElementById('new-task-modal').classList.remove('flex');
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('dragover');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            addFiles(files);
+        }
+
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            addFiles(files);
+            e.target.value = '';
+        }
+
+        function addFiles(files) {
+            const validTypes = ['.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.markdown', '.mark', '.html', '.pptx', '.xmind', '.mm', '.opml'];
+            files.forEach(file => {
+                const ext = '.' + file.name.split('.').pop().toLowerCase();
+                if (validTypes.includes(ext)) {
+                    selectedFiles.push(file);
+                } else {
+                    addLog('Upload', `跳过不支持的文件: ${file.name}`, 'warn');
+                }
+            });
+            renderFileList();
+        }
+
+        function renderFileList() {
+            const container = document.getElementById('file-list');
+            container.innerHTML = selectedFiles.map((file, index) => `
+                <div class="flex justify-between items-center bg-slate-50 p-2 rounded border border-slate-200">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-file text-slate-400"></i>
+                        <span class="text-sm">${file.name}</span>
+                        <span class="text-xs text-slate-400">(${(file.size / 1024).toFixed(1)} KB)</span>
+                    </div>
+                    <button class="text-red-500 hover:text-red-700" onclick="removeFile(${index})">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            renderFileList();
+        }
+
+        async function submitNewTask() {
+            const name = document.getElementById('task-name').value.trim();
+            const templateId = document.getElementById('task-template').value;
+            
+            if (!name) {
+                await appAlert('请输入任务名称');
+                return;
+            }
+            if (selectedFiles.length === 0) {
+                await appAlert('请至少选择一个文件');
+                return;
+            }
+            
+            let taskId = null;
+            
+            try {
+                // 步骤1: 创建任务
+                const task = await apiCall('POST', '/api/tasks', {
+                    name,
+                    template_id: templateId
+                });
+                
+                taskId = task.id;
+                addLog('Task', `创建任务: ${name} (ID: ${task.id})`, 'info');
+                
+            } catch (error) {
+                addLog('Task', `创建任务失败: ${error.message}`, 'error');
+                await appAlert('创建任务失败: ' + error.message);
+                return;
+            }
+            
+            // 步骤2: 上传文件（单独 try-catch，失败后仍可重试）
+            try {
+                const formData = new FormData();
+                selectedFiles.forEach(file => formData.append('files', file));
+                
+                const uploadResponse = await fetch(`${API_BASE}/api/tasks/${taskId}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!uploadResponse.ok) {
+                    const errorText = await uploadResponse.text();
+                    throw new Error(errorText || '文件上传失败');
+                }
+                
+                const uploadResult = await uploadResponse.json();
+                const uploadedCount = Array.isArray(uploadResult.uploaded) ? uploadResult.uploaded.length : 0;
+                const duplicateCount = Array.isArray(uploadResult.duplicates) ? uploadResult.duplicates.length : 0;
+
+                addLog('Upload', `上传完成: ${uploadedCount} 个文件`, 'success');
+                if (duplicateCount > 0) {
+                    addLog('Upload', `检测到重复文件: ${duplicateCount} 个，已自动跳过`, 'warn');
+                    const duplicatePreview = (uploadResult.duplicates || []).map(item => ({
+                        name: item.name,
+                        status: 'duplicate'
+                    }));
+                    updateFileStatusSummary(duplicatePreview);
+                }
+                
+                closeNewTaskModal();
+                loadTasks();
+                switchTab('tasks');
+                
+                if (uploadedCount === 0 && duplicateCount > 0) {
+                    await appAlert(`本次选择的文件均为重复文件（${duplicateCount} 个），系统已跳过上传。`);
+                }
+
+                // 询问是否立即开始
+                if (uploadedCount > 0 && await appConfirm('任务已创建，是否立即开始迁移？')) {
+                    await startTask(taskId);
+                }
+                
+            } catch (error) {
+                addLog('Upload', `上传失败: ${error.message}`, 'error');
+                await appAlert(`文件上传失败: ${error.message}\n\n任务已创建但文件未上传。请删除该任务后重新创建，或联系管理员。`);
+                
+                // 关闭弹窗，刷新任务列表（显示已创建的空任务）
+                closeNewTaskModal();
+                loadTasks();
+                switchTab('tasks');
+            }
+        }
+
+        async function startTask(taskId) {
+            try {
+                await apiCall('POST', `/api/tasks/${taskId}/start`);
+                currentTaskId = taskId;
+                addLog('Task', `开始执行任务: ${taskId}`, 'info');
+                loadTasks();
+            } catch (error) {
+                addLog('Task', `启动任务失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function cancelTask(taskId) {
+            try {
+                await apiCall('POST', `/api/tasks/${taskId}/cancel`);
+                addLog('Task', `取消任务: ${taskId}`, 'warn');
+                loadTasks();
+            } catch (error) {
+                addLog('Task', `取消任务失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteTask(taskId) {
+            if (!(await appConfirm('确定要删除此任务吗？'))) return;
+            try {
+                await apiCall('DELETE', `/api/tasks/${taskId}`);
+                addLog('Task', `删除任务: ${taskId}`, 'info');
+                loadTasks();
+            } catch (error) {
+                addLog('Task', `删除任务失败: ${error.message}`, 'error');
+            }
+        }
+
+        function showTaskDetail(taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) return;
+            
+            const content = document.getElementById('task-detail-content');
+            content.innerHTML = `
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-xs text-slate-500">任务名称</label>
+                        <p class="font-medium">${task.name}</p>
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500">任务ID</label>
+                        <p class="text-sm font-mono">${task.id}</p>
+                    </div>
+                    <div class="flex gap-4">
+                        <div>
+                            <label class="text-xs text-slate-500">状态</label>
+                            <p><span class="text-xs px-2 py-1 rounded ${getStatusClass(task.status)}">${getStatusText(task.status)}</span></p>
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-500">文件数</label>
+                            <p class="font-medium">${task.files?.length || 0}</p>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500">进度</label>
+                        <div class="w-full bg-slate-200 rounded-full h-2 mt-1">
+                            <div class="bg-blue-500 h-2 rounded-full" style="width: ${task.progress || 0}%"></div>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-1">${task.progress || 0}%</p>
+                    </div>
+                    ${task.results ? `
+                    <div>
+                        <label class="text-xs text-slate-500">执行结果</label>
+                        <p class="text-sm">成功: ${task.results.processed || 0}, 重复: ${task.results.duplicate || 0}, 失败: ${task.results.failed || 0}</p>
+                    </div>
+                    ` : ''}
+                    ${task.error_message ? `
+                    <div>
+                        <label class="text-xs text-slate-500">错误信息</label>
+                        <p class="text-sm text-red-600">${task.error_message}</p>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+            
+            const actions = document.getElementById('task-detail-actions');
+            actions.innerHTML = '';
+            
+            if (task.status === 'pending') {
+                actions.innerHTML += `<button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg mr-2" onclick="startTask('${task.id}'); closeTaskDetailModal();">开始</button>`;
+            } else if (task.status === 'running') {
+                actions.innerHTML += `<button class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg mr-2" onclick="cancelTask('${task.id}'); closeTaskDetailModal();">取消</button>`;
+            }
+            actions.innerHTML += `<button class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg mr-2" onclick="deleteTask('${task.id}'); closeTaskDetailModal();">删除</button>`;
+            actions.innerHTML += `<button class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg" onclick="closeTaskDetailModal()">关闭</button>`;
+            
+            document.getElementById('task-detail-modal').classList.remove('hidden');
+            document.getElementById('task-detail-modal').classList.add('flex');
+        }
+
+        function closeTaskDetailModal() {
+            document.getElementById('task-detail-modal').classList.add('hidden');
+            document.getElementById('task-detail-modal').classList.remove('flex');
+        }
+
+        // --- 配置管理 ---
+        async function testFeishuConnection() {
+            try {
+                const appId = document.getElementById('feishu-app-id').value.trim();
+                const appSecret = document.getElementById('feishu-app-secret').value.trim();
+                const result = await apiCall('POST', '/api/feishu/credentials/test', {
+                    app_id: appId || undefined,
+                    app_secret: appSecret || undefined
+                });
+                addLog('Feishu', '应用凭据测试成功', 'success');
+                await appAlert(result?.message || '飞书应用连接测试成功！');
+            } catch (error) {
+                addLog('Feishu', '连接测试失败: ' + error.message, 'error');
+                await appAlert('连接失败：' + error.message);
+            }
+        }
+
+        // 旧的 loadTemplate 函数，现在使用 onConfigTemplateChange
+        async function loadTemplate() {
+            // 委托给新的函数处理
+            await onConfigTemplateChange();
+        }
+
+        // 保存配置 - 带确认按钮和详细反馈
+        async function saveConfig() {
+            const provider = document.getElementById('llm-provider').value;
+            const apiKeyInput = document.getElementById('llm-api-key');
+            const apiKey = apiKeyInput.value.trim();
+            const requiresApiKey = !providersWithoutApiKey.has(provider);
+            const qualityCheckEl = document.getElementById('llm-quality-check');
+            const hasExistingKey = Boolean(llmApiKeyMap[provider]);
+            const shouldUpdateLlm = !requiresApiKey || Boolean(apiKey) || hasExistingKey;
+            const appIdInput = document.getElementById('feishu-app-id');
+            const appSecretInput = document.getElementById('feishu-app-secret');
+            const appId = appIdInput ? appIdInput.value.trim() : '';
+            const appSecret = appSecretInput ? appSecretInput.value.trim() : '';
+            const hasFeishuUpdate = Boolean(appId || appSecret);
+            
+            // 验证输入
+            if (!provider) {
+                await appAlert('请选择 LLM 提供商');
+                return;
+            }
+            
+            // 构建配置对象
+            const config = {};
+            if (hasFeishuUpdate) {
+                config.feishu = {};
+                if (appId) {
+                    config.feishu.app_id = appId;
+                }
+                if (appSecret) {
+                    config.feishu.app_secret = appSecret;
+                }
+            }
+            if (shouldUpdateLlm) {
+                config.llm = {
+                    provider: provider
+                };
+                if (qualityCheckEl) {
+                    config.llm.quality_check = qualityCheckEl.checked;
+                }
+            }
+            
+            // 只有输入了新 key 才发送
+            if (shouldUpdateLlm && requiresApiKey && apiKey && !apiKey.startsWith('•')) {
+                config.llm.api_key = apiKey;
+            }
+
+            if (Object.keys(config).length === 0) {
+                await appAlert('未检测到可保存项。可直接点击“获取授权”或先输入新配置。');
+                return;
+            }
+            
+            // 显示保存中状态
+            const saveBtn = document.getElementById('save-config-btn');
+            const originalText = saveBtn.innerHTML;
+            saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>保存中...';
+            saveBtn.disabled = true;
+            
+            try {
+                const result = await apiCall('POST', '/api/config', config);
+                addLog('Config', '配置已保存到文件', 'success');
+                
+                // 保存成功后更新占位符
+                if (requiresApiKey && apiKey && !apiKey.startsWith('•')) {
+                    llmApiKeyMap[provider] = true;
+                    apiKeyInput.value = ''; // 清空输入
+                }
+                updateProviderApiKeyPlaceholder();
+
+                if (hasFeishuUpdate) {
+                    if (appId) {
+                        feishuConfigState.hasSavedAppId = true;
+                        feishuConfigState.maskedAppId = appId.length > 10 ? `${appId.slice(0, 10)}***` : `${appId}***`;
+                        appIdInput.value = '';
+                    }
+                    if (appSecret) {
+                        feishuConfigState.hasSavedAppSecret = true;
+                        appSecretInput.value = '';
+                    }
+                    updateFeishuInputPlaceholder();
+                }
+                
+                // 显示成功提示
+                if (!shouldUpdateLlm && requiresApiKey) {
+                    showNotification('飞书配置保存成功（未填写 LLM Key，已跳过 LLM 更新）', 'success');
+                } else {
+                    showNotification('配置保存成功！', 'success');
+                }
+            } catch (error) {
+                addLog('Config', '保存配置失败: ' + error.message, 'error');
+                showNotification('保存失败: ' + error.message, 'error');
+            } finally {
+                // 恢复按钮状态
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            }
+        }
+
+        async function clearConfig() {
+            const confirmed = await appConfirm(
+                '将清空飞书 App ID/App Secret、LLM API Key，并退出飞书授权。\n此操作不可恢复，是否继续？',
+                '清空配置'
+            );
+            if (!confirmed) return;
+
+            const clearBtn = document.getElementById('clear-config-btn');
+            const saveBtn = document.getElementById('save-config-btn');
+            const originalText = clearBtn.innerHTML;
+            clearBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>清空中...';
+            clearBtn.disabled = true;
+            if (saveBtn) saveBtn.disabled = true;
+
+            try {
+                await apiCall('POST', '/api/config/clear');
+                document.getElementById('feishu-app-id').value = '';
+                document.getElementById('feishu-app-secret').value = '';
+                const apiKeyInput = document.getElementById('llm-api-key');
+                if (apiKeyInput) apiKeyInput.value = '';
+                Object.keys(llmApiKeyMap || {}).forEach(name => {
+                    llmApiKeyMap[name] = false;
+                });
+                updateProviderApiKeyPlaceholder();
+                feishuConfigState = { hasSavedAppId: false, hasSavedAppSecret: false, maskedAppId: '' };
+                updateFeishuInputPlaceholder();
+                await checkAuthStatus();
+                showNotification('配置已清空', 'success');
+                addLog('Config', '已清空敏感配置与授权信息', 'info');
+            } catch (error) {
+                addLog('Config', '清空配置失败: ' + error.message, 'error');
+                showNotification('清空失败: ' + error.message, 'error');
+            } finally {
+                clearBtn.innerHTML = originalText;
+                clearBtn.disabled = false;
+                if (saveBtn) saveBtn.disabled = false;
+            }
+        }
+        
+        // 显示通知（自动消失）
+        function showNotification(message, type = 'info') {
+            const colors = {
+                success: 'bg-green-500',
+                error: 'bg-red-500',
+                info: 'bg-blue-500',
+                warning: 'bg-yellow-500'
+            };
+            
+            const div = document.createElement('div');
+            div.className = `fixed top-4 right-4 ${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-opacity duration-300`;
+            div.textContent = message;
+            document.body.appendChild(div);
+            
+            setTimeout(() => {
+                div.style.opacity = '0';
+                setTimeout(() => div.remove(), 300);
+            }, 3000);
+        }
+
+        // --- 演示模式 ---
+        let simulationInterval = null;
+        
+        function runSimulation() {
+            console.log('开始运行演示...');
+            
+            // 确保先切换到监控面板
+            switchTab('monitor');
+            
+            // 重置状态
+            if (simulationInterval) {
+                clearInterval(simulationInterval);
+                simulationInterval = null;
+            }
+            
+            resetSimulation();
+            addLog('System', '=== 演示模式开始 ===', 'info');
+            simulationModeActive = true;
+            startChartSimulation();
+            
+            let progress = 0;
+            simulationInterval = setInterval(() => {
+                progress += 2;
+                updateProgress(progress);
+                
+                // 更新图表
+                if (progress % 10 === 0 && throughputChart) {
+                    try {
+                        const option = throughputChart.getOption();
+                        if (option && option.series && option.series[0]) {
+                            const data = option.series[0].data;
+                            data.shift();
+                            data.push(Math.floor(Math.random() * 8) + 1);
+                            throughputChart.setOption({ series: [{ data }] });
+                        }
+                    } catch (e) {
+                        console.error('图表更新失败:', e);
+                    }
+                }
+                
+                // 阶段模拟 - 使用新的流动效果
+                if (progress === 10) {
+                    activateLayerWithFlow('layer-ui', 'line-1');
+                    document.getElementById('current-phase').innerText = "阶段 1: 文件上传";
+                    addLog('Frontend', '上传 23 个文件', 'info');
+                } else if (progress === 30) {
+                    activateLayerWithFlow('layer-file', 'line-2');
+                    document.getElementById('current-phase').innerText = "阶段 2: 格式转换";
+                    addLog('Converter', 'PDF → Markdown 完成', 'success');
+                    updateStats(12, 0, 0, 0);
+                } else if (progress === 50) {
+                    activateLayerWithFlow('layer-llm', 'line-3');
+                    document.getElementById('current-phase').innerText = "阶段 3: LLM处理";
+                    addLog('LLM', '内容清洗完成，质量评分 85', 'success');
+                    updateStats(12, 0, 4500, 0);
+                } else if (progress === 80) {
+                    activateLayerWithFlow('layer-api', null);
+                    document.getElementById('current-phase').innerText = "阶段 4: 飞书上传";
+                    addLog('Feishu', '创建知识空间，上传文档', 'info');
+                    updateStats(20, 1, 4500, 45);
+                } else if (progress >= 100) {
+                    clearInterval(simulationInterval);
+                    simulationInterval = null;
+                    document.getElementById('current-phase').innerText = "✓ 演示完成";
+                    addLog('System', '=== 演示模式结束 ===', 'success');
+                    updateStats(22, 1, 5200, 52);
+                    simulationModeActive = false;
+                    if (chartSimulationInterval) {
+                        clearInterval(chartSimulationInterval);
+                        chartSimulationInterval = null;
+                    }
+                    activateLayerWithFlow(null, null);
+                }
+            }, 100);
+            
+            console.log('演示已启动');
+        }
+
+        // --- 真实迁移 ---
+        async function startRealMigration() {
+            if (tasks.length === 0) {
+                await appAlert('请先创建一个任务');
+                await createNewTask();
+                return;
+            }
+            
+            const pendingTasks = tasks.filter(t => t.status === 'pending');
+            if (pendingTasks.length === 0) {
+                await appAlert('没有待处理的任务');
+                return;
+            }
+            
+            // 选择第一个待处理任务
+            const task = pendingTasks[0];
+            if (await appConfirm(`开始执行任务 "${task.name}"？`)) {
+                await startTask(task.id);
+            }
+        }
+
+        function resetSimulation() {
+            // 清理演示定时器
+            if (simulationInterval) {
+                clearInterval(simulationInterval);
+                simulationInterval = null;
+            }
+            simulationModeActive = false;
+            if (chartSimulationInterval) {
+                clearInterval(chartSimulationInterval);
+                chartSimulationInterval = null;
+            }
+            latestFileStatusList = [];
+            statusFileNameMap = { success: [], duplicate: [], failed: [] };
+            
+            updateProgress(0);
+            updateStats(0, 0, 0, 0);
+            clearLogs();
+            addLog('System', '系统已重置', 'info');
+            document.getElementById('current-phase').innerText = '等待开始...';
+            activateLayerWithFlow(null, null);
+            
+            // 重置图表数据
+            chartDataHistory = new Array(20).fill(0);
+            if (throughputChart) {
+                const option = throughputChart.getOption();
+                if (option && option.series && option.series[0]) {
+                    option.xAxis[0].data = Array.from({length: 20}, (_, i) => `${i + 1}s`);
+                    option.series[0].data = chartDataHistory;
+                    throughputChart.setOption(option);
+                }
+            }
+            
+            // 重置计数器
+            lastProcessedCount = 0;
+            lastChartUpdateTime = Date.now();
+            lastApiCount = 0;
+            lastApiUpdateTime = Date.now();
+        }
+
+        // ============ 模板管理功能 ============
+        let allTemplates = [];
+        let currentTemplateId = null;
+        let currentTemplateData = null;
+        let selectedNodeId = null;
+
+        async function loadTemplatesForManage() {
+            try {
+                allTemplates = await apiCall('GET', '/api/templates');
+                updateTemplateSelect();
+            } catch (e) {
+                console.error('加载模板失败:', e);
+            }
+        }
+
+        function updateTemplateSelect() {
+            const select = document.getElementById('template-select-manage');
+            const currentValue = select.value;
+            
+            let html = '<option value="">选择模板...</option>';
+            allTemplates.forEach(t => {
+                html += `<option value="${t.id}">${t.name}</option>`;
+            });
+            select.innerHTML = html;
+            
+            if (currentValue && allTemplates.find(t => t.id === currentValue)) {
+                select.value = currentValue;
+            }
+        }
+
+        function sanitizeTemplateFileName(name) {
+            return String(name || 'template')
+                .replace(/[\\/:*?"<>|]/g, '_')
+                .replace(/\s+/g, '_')
+                .slice(0, 80);
+        }
+
+        async function importTemplateFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch(`${API_BASE}/api/templates/import`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(text || `HTTP ${response.status}`);
+            }
+
+            const payload = await response.json();
+            const importedId = payload?.template?.id;
+            if (!importedId) {
+                throw new Error('接口未返回模板 ID');
+            }
+
+            addLog('Template', `导入模板成功: ${payload.template.name || importedId}`, 'success');
+            await loadTemplatesForManage();
+
+            const select = document.getElementById('template-select-manage');
+            if (select) {
+                select.value = importedId;
+            }
+
+            await loadTemplateForEdit(importedId);
+            await loadTemplatesForSelect();
+            await loadTemplatesForConfig();
+            showNotification('模板导入成功', 'success');
+        }
+
+        async function triggerTemplateImportInput() {
+            try {
+                if (window.showOpenFilePicker) {
+                    const [fileHandle] = await window.showOpenFilePicker({
+                        multiple: false,
+                        types: [
+                            {
+                                description: 'JSON 模板',
+                                accept: { 'application/json': ['.json'] }
+                            }
+                        ]
+                    });
+                    if (!fileHandle) return;
+                    const file = await fileHandle.getFile();
+                    await importTemplateFile(file);
+                    return;
+                }
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    return;
+                }
+                console.warn('系统文件选择器不可用，回退至浏览器文件选择器:', error);
+            }
+
+            const input = document.getElementById('template-import-input');
+            if (input) {
+                input.value = '';
+                input.click();
+            }
+        }
+
+        async function handleTemplateImport(event) {
+            const input = event.target;
+            const file = input?.files?.[0];
+            if (!file) {
+                return;
+            }
+
+            try {
+                await importTemplateFile(file);
+            } catch (error) {
+                console.error('模板导入失败:', error);
+                showNotification('模板导入失败: ' + (error.message || '未知错误'), 'error');
+            } finally {
+                input.value = '';
+            }
+        }
+
+        async function exportCurrentTemplate() {
+            if (!currentTemplateId) {
+                showNotification('请先选择一个模板再导出', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/templates/${currentTemplateId}/export`);
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                const suggestedName = `${sanitizeTemplateFileName(currentTemplateData?.name || `template_${currentTemplateId}`)}.json`;
+                const mimeType = blob.type || 'application/json';
+
+                if (window.showSaveFilePicker) {
+                    try {
+                        const fileHandle = await window.showSaveFilePicker({
+                            suggestedName,
+                            types: [
+                                {
+                                    description: 'JSON 模板',
+                                    accept: { 'application/json': ['.json'] }
+                                }
+                            ]
+                        });
+                        if (!fileHandle) return;
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                        addLog('Template', '模板导出成功（已选择保存路径）', 'success');
+                        showNotification('模板导出成功', 'success');
+                        return;
+                    } catch (dialogError) {
+                        if (dialogError?.name === 'AbortError') {
+                            showNotification('已取消导出', 'info');
+                            return;
+                        }
+                        console.warn('系统保存对话框不可用，回退到浏览器下载:', dialogError);
+                    }
+                }
+
+                const url = URL.createObjectURL(new Blob([blob], { type: mimeType }));
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = suggestedName;
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+                URL.revokeObjectURL(url);
+
+                showNotification('模板导出成功', 'success');
+            } catch (error) {
+                console.error('导出失败:', error);
+                showNotification('模板导出失败: ' + (error.message || '未知错误'), 'error');
+            }
+        }
+
+        async function onTemplateSelectChange() {
+            const select = document.getElementById('template-select-manage');
+            const templateId = select.value;
+            
+            if (!templateId) {
+                document.getElementById('template-edit-area').classList.add('hidden');
+                document.getElementById('template-empty-state').style.display = 'flex';
+                currentTemplateId = null;
+                currentTemplateData = null;
+                return;
+            }
+            
+            await loadTemplateForEdit(templateId);
+        }
+
+        async function loadTemplateForEdit(templateId) {
+            try {
+                const template = await apiCall('GET', `/api/templates/${templateId}`);
+                currentTemplateId = templateId;
+                currentTemplateData = template;
+                
+                // 显示编辑区
+                document.getElementById('template-edit-area').classList.remove('hidden');
+                document.getElementById('template-empty-state').style.display = 'none';
+                
+                // 填充基本信息
+                document.getElementById('template-name-input').value = template.name || '';
+                document.getElementById('template-desc-input').value = template.description || '';
+                
+                // 渲染树形结构
+                renderTemplateTreeForManage(template.structure || []);
+                
+                // 隐藏节点编辑面板
+                document.getElementById('node-edit-panel').style.display = 'none';
+                selectedNodeId = null;
+            } catch (e) {
+                console.error('加载模板详情失败:', e);
+                await appAlert('加载模板失败');
+            }
+        }
+
+        function renderTemplateTreeForManage(nodes, containerId = 'template-tree-manage', parentPath = '') {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            if (!nodes || nodes.length === 0) {
+                container.innerHTML = '<div class="text-slate-400 text-xs p-2">暂无节点，点击"添加根节点"创建</div>';
+                return;
+            }
+            
+            nodes.forEach((node, index) => {
+                const nodeEl = document.createElement('div');
+                nodeEl.className = 'tree-node-item';
+                
+                const icon = node.type === 'folder' ? '📁' : '📄';
+                const isSelected = node.id === selectedNodeId;
+                
+                nodeEl.innerHTML = `
+                    <div class="flex items-center py-1 px-2 rounded cursor-pointer hover:bg-slate-200 ${isSelected ? 'bg-blue-100 border-l-2 border-blue-500' : ''}" 
+                         onclick="selectNode('${node.id}')" 
+                         style="padding-left: ${(parentPath.split('/').length) * 12 + 8}px">
+                        <span class="mr-1">${icon}</span>
+                        <span class="text-sm ${isSelected ? 'font-medium text-blue-700' : 'text-slate-700'}">${node.name}</span>
+                    </div>
+                `;
+                
+                container.appendChild(nodeEl);
+                
+                // 递归渲染子节点
+                if (node.children && node.children.length > 0) {
+                    const childrenContainer = document.createElement('div');
+                    childrenContainer.id = `node-children-${node.id}`;
+                    container.appendChild(childrenContainer);
+                    renderTemplateTreeForManage(node.children, childrenContainer.id, `${parentPath}/${index}`);
+                }
+            });
+        }
+
+        function selectNode(nodeId) {
+            selectedNodeId = nodeId;
+            
+            // 查找节点数据
+            const node = findNodeInTree(currentTemplateData.structure, nodeId);
+            if (node) {
+                document.getElementById('node-name-input').value = node.name;
+                document.getElementById('node-edit-panel').style.display = 'block';
+            }
+            
+            // 重新渲染以显示选中状态
+            renderTemplateTreeForManage(currentTemplateData.structure);
+        }
+
+        function findNodeInTree(nodes, nodeId) {
+            for (const node of nodes) {
+                if (node.id === nodeId) return node;
+                if (node.children) {
+                    const found = findNodeInTree(node.children, nodeId);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        async function createNewTemplate() {
+            const name = await appPrompt('请输入模板名称:', '新建模板');
+            if (!name) return;
+            
+            const description = (await appPrompt('请输入模板描述 (可选):', '新建模板')) || '';
+            
+            try {
+                const template = await apiCall('POST', '/api/templates', {
+                    name,
+                    description,
+                    structure: []
+                });
+                
+                await loadTemplatesForManage();
+                document.getElementById('template-select-manage').value = template.id;
+                await loadTemplateForEdit(template.id);
+                await loadTemplatesForSelect();
+                await loadTemplatesForConfig();
+                
+                addLog('Template', `创建模板: ${name}`, 'success');
+            } catch (e) {
+                console.error('创建模板失败:', e);
+                await appAlert('创建模板失败');
+            }
+        }
+
+        async function saveTemplateInfo() {
+            if (!currentTemplateId) {
+                await appAlert('请先选择模板');
+                return;
+            }
+            
+            const name = document.getElementById('template-name-input').value.trim();
+            const description = document.getElementById('template-desc-input').value.trim();
+            
+            if (!name) {
+                await appAlert('模板名称不能为空');
+                return;
+            }
+            
+            try {
+                console.log('保存模板:', currentTemplateId, { name, description });
+                const result = await apiCall('PUT', `/api/templates/${currentTemplateId}`, {
+                    name,
+                    description
+                });
+                console.log('保存结果:', result);
+                
+                // 更新当前数据
+                if (currentTemplateData) {
+                    currentTemplateData.name = name;
+                    currentTemplateData.description = description;
+                }
+                
+                addLog('Template', '更新模板信息成功', 'success');
+                await loadTemplatesForManage();
+                await loadTemplatesForSelect();
+                
+                // 刷新配置页面的模板列表
+                await loadTemplatesForConfig();
+            } catch (e) {
+                console.error('保存模板信息失败:', e);
+                await appAlert('保存失败: ' + (e.message || '未知错误'));
+            }
+        }
+
+        async function deleteCurrentTemplate() {
+            if (!currentTemplateId) return;
+            if (!(await appConfirm('确定要删除这个模板吗？此操作不可恢复。'))) return;
+            
+            try {
+                await apiCall('DELETE', `/api/templates/${currentTemplateId}`);
+                
+                addLog('Template', '删除模板成功', 'success');
+                currentTemplateId = null;
+                currentTemplateData = null;
+                document.getElementById('template-edit-area').classList.add('hidden');
+                document.getElementById('template-empty-state').style.display = 'flex';
+                document.getElementById('template-select-manage').value = '';
+                await loadTemplatesForManage();
+                await loadTemplatesForSelect();
+                await loadTemplatesForConfig();
+            } catch (e) {
+                console.error('删除模板失败:', e);
+                await appAlert('删除失败');
+            }
+        }
+
+        async function addRootNode() {
+            if (!currentTemplateId) return;
+            
+            const name = await appPrompt('请输入节点名称:', '添加根节点');
+            if (!name) return;
+            
+            try {
+                await apiCall('POST', `/api/templates/${currentTemplateId}/nodes`, {
+                    parent_id: null,
+                    node: {
+                        name,
+                        type: 'folder'
+                    }
+                });
+                
+                await loadTemplateForEdit(currentTemplateId);
+                addLog('Template', '添加根节点成功', 'success');
+            } catch (e) {
+                console.error('添加节点失败:', e);
+                await appAlert('添加节点失败');
+            }
+        }
+
+        async function addChildNode() {
+            if (!currentTemplateId || !selectedNodeId) {
+                await appAlert('请先选择一个节点');
+                return;
+            }
+            
+            const name = await appPrompt('请输入子节点名称:', '添加子节点');
+            if (!name) return;
+            
+            try {
+                await apiCall('POST', `/api/templates/${currentTemplateId}/nodes`, {
+                    parent_id: selectedNodeId,
+                    node: {
+                        name,
+                        type: 'folder'
+                    }
+                });
+                
+                await loadTemplateForEdit(currentTemplateId);
+                addLog('Template', '添加子节点成功', 'success');
+            } catch (e) {
+                console.error('添加子节点失败:', e);
+                await appAlert('添加子节点失败');
+            }
+        }
+
+        async function saveNodeEdit() {
+            if (!currentTemplateId || !selectedNodeId) return;
+            
+            const name = document.getElementById('node-name-input').value;
+            
+            try {
+                await apiCall('PUT', `/api/templates/${currentTemplateId}/nodes/${selectedNodeId}`, {
+                    name,
+                    type: 'folder'
+                });
+                
+                await loadTemplateForEdit(currentTemplateId);
+                addLog('Template', '更新节点成功', 'success');
+            } catch (e) {
+                console.error('更新节点失败:', e);
+                await appAlert('更新节点失败');
+            }
+        }
+
+        function cancelNodeEdit() {
+            document.getElementById('node-edit-panel').style.display = 'none';
+            selectedNodeId = null;
+            renderTemplateTreeForManage(currentTemplateData.structure);
+        }
+
+        async function deleteCurrentNode() {
+            if (!currentTemplateId || !selectedNodeId) return;
+            if (!(await appConfirm('确定要删除这个节点吗？其子节点也会被删除。'))) return;
+            
+            try {
+                await apiCall('DELETE', `/api/templates/${currentTemplateId}/nodes/${selectedNodeId}`);
+                
+                document.getElementById('node-edit-panel').style.display = 'none';
+                selectedNodeId = null;
+                await loadTemplateForEdit(currentTemplateId);
+                addLog('Template', '删除节点成功', 'success');
+            } catch (e) {
+                console.error('删除节点失败:', e);
+                await appAlert('删除节点失败');
+            }
+        }
+
+        // ============ OAuth 授权相关函数 ============
+        
+        // 检查授权状态
+        async function checkAuthStatus() {
+            try {
+                const status = await apiCall('GET', '/api/auth/status');
+                updateAuthUI(status);
+                return status.authorized;
+            } catch (e) {
+                console.error('检查授权状态失败:', e);
+                return false;
+            }
+        }
+        
+        // 更新授权UI - 支持多种状态显示
+        function updateAuthUI(status) {
+            const iconEl = document.getElementById('auth-status-icon');
+            const textEl = document.getElementById('auth-status-text');
+            const expiryEl = document.getElementById('auth-expiry');
+            const authBtn = document.getElementById('auth-btn');
+            const refreshBtn = document.getElementById('auth-refresh-btn');
+            
+            const tokenInfo = status.token_info || {};
+            const tokenStatus = tokenInfo.status || 'unauthorized';
+
+            function stopAuthCountdown() {
+                if (authCountdownTimer) {
+                    clearInterval(authCountdownTimer);
+                    authCountdownTimer = null;
+                }
+            }
+
+            function renderRemaining(seconds) {
+                const s = Math.max(0, Number(seconds || 0));
+                const hours = Math.floor(s / 3600);
+                const minutes = Math.floor((s % 3600) / 60);
+                const sec = s % 60;
+                expiryEl.textContent = `授权有效（剩余 ${hours}小时${minutes}分${sec}秒）`;
+            }
+            
+            // 根据状态设置UI
+            switch(tokenStatus) {
+                case 'valid':
+                    // 授权有效
+                    iconEl.innerHTML = '<i class="fa-solid fa-circle-check"></i>';
+                    iconEl.className = 'text-green-500';
+                    textEl.textContent = '已授权';
+                    textEl.className = 'text-sm font-medium text-green-700';
+                    
+                    stopAuthCountdown();
+                    let remaining = Number(tokenInfo.access_token_remaining || 0);
+                    renderRemaining(remaining);
+                    authCountdownTimer = setInterval(() => {
+                        remaining = Math.max(0, remaining - 1);
+                        renderRemaining(remaining);
+                        if (remaining <= 0) {
+                            stopAuthCountdown();
+                            checkAuthStatus();
+                        }
+                    }, 1000);
+                    expiryEl.className = 'text-xs text-green-600';
+                    
+                    authBtn.innerHTML = '<i class="fa-solid fa-right-from-bracket mr-1"></i>退出登录';
+                    authBtn.onclick = logoutAuth;
+                    authBtn.className = 'w-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm py-2 rounded-lg';
+                    refreshBtn.classList.remove('hidden');
+                    break;
+                    
+                case 'expired_refreshable':
+                    // 已过期但可刷新
+                    stopAuthCountdown();
+                    iconEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+                    iconEl.className = 'text-yellow-500';
+                    textEl.textContent = '授权已过期';
+                    textEl.className = 'text-sm font-medium text-yellow-700';
+                    expiryEl.textContent = '点击刷新按钮恢复授权';
+                    expiryEl.className = 'text-xs text-yellow-600';
+                    
+                    authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket mr-1"></i>重新授权';
+                    authBtn.onclick = handleAuthClick;
+                    authBtn.className = 'w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded-lg';
+                    refreshBtn.classList.remove('hidden');
+                    break;
+                    
+                case 'refresh_expired':
+                    // 刷新令牌也过期了
+                    stopAuthCountdown();
+                    iconEl.innerHTML = '<i class="fa-solid fa-circle-xmark"></i>';
+                    iconEl.className = 'text-red-500';
+                    textEl.textContent = '授权已过期（需重新授权）';
+                    textEl.className = 'text-sm font-medium text-red-700';
+                    expiryEl.textContent = '超过7天未使用，需要重新授权';
+                    expiryEl.className = 'text-xs text-red-600';
+                    
+                    authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket mr-1"></i>重新授权';
+                    authBtn.onclick = handleAuthClick;
+                    authBtn.className = 'w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded-lg';
+                    refreshBtn.classList.add('hidden');
+                    break;
+                    
+                case 'unauthorized':
+                default:
+                    // 未授权
+                    stopAuthCountdown();
+                    iconEl.innerHTML = '<i class="fa-solid fa-circle-xmark"></i>';
+                    iconEl.className = 'text-red-500';
+                    textEl.textContent = '未授权';
+                    textEl.className = 'text-sm font-medium text-slate-700';
+                    expiryEl.textContent = '点击授权按钮登录飞书账号';
+                    expiryEl.className = 'text-xs text-slate-500';
+                    
+                    authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket mr-1"></i>授权登录';
+                    authBtn.onclick = handleAuthClick;
+                    authBtn.className = 'w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded-lg';
+                    refreshBtn.classList.add('hidden');
+                    break;
+            }
+        }
+        
+        // 全局监听授权消息（只注册一次）
+        let authCheckInterval = null;
+        
+        window.addEventListener('message', handleAuthCallback);
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') return;
+            const modal = document.getElementById('app-dialog-modal');
+            if (modal && !modal.classList.contains('hidden')) {
+                event.preventDefault();
+                closeAppDialog(false);
+            }
+        });
+        
+        // 处理授权按钮点击
+        async function handleAuthClick() {
+            try {
+                const response = await apiCall('GET', '/api/auth/url?redirect_uri=http://127.0.0.1:8000/auth/callback');
+                addLog('OAuth', '正在跳转飞书授权页面', 'info');
+                showNotification('正在打开飞书授权页...', 'info');
+
+                if (authCheckInterval) {
+                    clearInterval(authCheckInterval);
+                    authCheckInterval = null;
+                }
+
+                authPopupWindow = window.open(
+                    response.auth_url,
+                    'docuflow_feishu_oauth',
+                    'width=980,height=760,menubar=no,toolbar=no,location=yes,status=no'
+                );
+
+                if (!authPopupWindow) {
+                    const continueInCurrentWindow = await appConfirm(
+                        '授权窗口未能打开，可能被系统拦截。\n是否在当前窗口继续授权？',
+                        '授权窗口受限'
+                    );
+                    if (continueInCurrentWindow) {
+                        window.location.href = response.auth_url;
+                    }
+                    return;
+                }
+
+                const startedAt = Date.now();
+                authCheckInterval = setInterval(async () => {
+                    try {
+                        const status = await apiCall('GET', '/api/auth/status');
+                        if (status?.authorized) {
+                            clearInterval(authCheckInterval);
+                            authCheckInterval = null;
+                            showNotification('授权成功', 'success');
+                            await checkAuthStatus();
+                            try {
+                                if (authPopupWindow && !authPopupWindow.closed) {
+                                    authPopupWindow.close();
+                                }
+                            } catch (_) {
+                            }
+                            authPopupWindow = null;
+                            return;
+                        }
+                    } catch (_) {
+                    }
+
+                    const elapsed = Date.now() - startedAt;
+                    const popupClosed = authPopupWindow?.closed === true;
+                    if (popupClosed || elapsed > 180000) {
+                        clearInterval(authCheckInterval);
+                        authCheckInterval = null;
+                        authPopupWindow = null;
+                        checkAuthStatus();
+                    }
+                }, 2000);
+            } catch (e) {
+                console.error('获取授权URL失败:', e);
+                await appAlert('获取授权链接失败: ' + e.message);
+            }
+        }
+        
+        // 处理授权回调
+        async function handleAuthCallback(event) {
+            console.log('收到 postMessage:', event.data, 'from:', event.origin);
+            
+            // 检查消息来源（允许来自同一域名或飞书）
+            const allowedOrigins = [
+                window.location.origin,
+                'http://127.0.0.1:8000',
+                'https://open.feishu.cn'
+            ];
+            
+            if (!allowedOrigins.includes(event.origin) && !event.origin.includes('127.0.0.1')) {
+                console.warn('拒绝来自', event.origin, '的消息');
+                return;
+            }
+            
+            const data = event.data;
+            if (data && data.type === 'oauth_success') {
+                addLog('OAuth', '飞书账号授权成功', 'success');
+                showNotification('授权成功', 'success');
+                await checkAuthStatus();
+                return;
+            }
+            if (data && data.type === 'oauth_error') {
+                const err = data.error || '未知错误';
+                addLog('OAuth', '授权失败: ' + err, 'error');
+                showNotification('授权失败: ' + err, 'error');
+                await checkAuthStatus();
+                return;
+            }
+            if (data && data.type === 'oauth_callback' && data.code) {
+                console.log('处理 OAuth 回调, code:', data.code.substring(0, 10) + '...');
+                const code = data.code;
+                try {
+                    await apiCall('POST', `/api/auth/exchange?code=${encodeURIComponent(code)}&redirect_uri=http://127.0.0.1:8000/auth/callback`);
+                    addLog('OAuth', '飞书账号授权成功', 'success');
+                    await checkAuthStatus();
+                } catch (e) {
+                    console.error('授权码交换失败:', e);
+                    addLog('OAuth', '授权失败: ' + e.message, 'error');
+                    await appAlert('授权失败: ' + e.message);
+                }
+            }
+        }
+        
+        // 刷新授权token - 带更好的反馈
+        async function refreshAuthToken() {
+            const refreshBtn = document.getElementById('auth-refresh-btn');
+            const originalText = refreshBtn.innerHTML;
+            
+            // 显示刷新中状态
+            refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>刷新中...';
+            refreshBtn.disabled = true;
+            
+            try {
+                const result = await apiCall('POST', '/api/auth/refresh');
+                addLog('OAuth', '授权刷新成功', 'success');
+                showNotification('授权刷新成功！', 'success');
+                await checkAuthStatus();
+            } catch (e) {
+                console.error('刷新授权失败:', e);
+                addLog('OAuth', '刷新授权失败: ' + e.message, 'error');
+                
+                // 根据错误信息判断是否需要重新授权
+                if (e.message.includes('重新授权') || e.message.includes('过期')) {
+                    showNotification(e.message, 'error');
+                    // 延迟后检查状态，更新UI
+                    setTimeout(checkAuthStatus, 500);
+                } else {
+                    showNotification('刷新失败: ' + e.message, 'error');
+                }
+            } finally {
+                // 恢复按钮状态
+                refreshBtn.innerHTML = originalText;
+                refreshBtn.disabled = false;
+            }
+        }
+        
+        // 退出登录
+        async function logoutAuth() {
+            try {
+                await apiCall('POST', '/api/auth/logout');
+                addLog('OAuth', '已退出登录', 'info');
+                await checkAuthStatus();
+            } catch (e) {
+                console.error('退出登录失败:', e);
+            }
+        }
+        
+        // 页面加载时检查授权状态和加载配置
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAuthStatus();
+            loadConfiguration();
+            const providerSelect = document.getElementById('llm-provider');
+            if (providerSelect) {
+                providerSelect.addEventListener('change', () => {
+                    const apiKeyInput = document.getElementById('llm-api-key');
+                    if (apiKeyInput) {
+                        apiKeyInput.value = '';
+                    }
+                    updateProviderApiKeyPlaceholder();
+                });
+            }
+        });
+        
+        window.addEventListener('beforeunload', () => {
+            if (authCountdownTimer) {
+                clearInterval(authCountdownTimer);
+                authCountdownTimer = null;
+            }
+            if (authCheckInterval) {
+                clearInterval(authCheckInterval);
+                authCheckInterval = null;
+            }
+            try {
+                if (authPopupWindow && !authPopupWindow.closed) {
+                    authPopupWindow.close();
+                }
+            } catch (_) {
+            }
+            authPopupWindow = null;
+        });
+
+        function updateProviderApiKeyPlaceholder() {
+            const apiKeyInput = document.getElementById('llm-api-key');
+            if (!apiKeyInput) return;
+            const provider = document.getElementById('llm-provider').value;
+            if (providersWithoutApiKey.has(provider)) {
+                apiKeyInput.placeholder = '当前模型无需 API Key';
+                apiKeyInput.dataset.hasKey = 'false';
+                apiKeyInput.disabled = true;
+                return;
+            }
+            apiKeyInput.disabled = false;
+            const hasKey = llmApiKeyMap[provider] === true;
+            if (hasKey) {
+                apiKeyInput.placeholder = '••••••（当前模型已设置，留空表示不修改）';
+                apiKeyInput.dataset.hasKey = 'true';
+            } else {
+                apiKeyInput.placeholder = '输入API Key';
+                apiKeyInput.dataset.hasKey = 'false';
+            }
+        }
+
+        function updateFeishuInputPlaceholder() {
+            const appIdInput = document.getElementById('feishu-app-id');
+            const appSecretInput = document.getElementById('feishu-app-secret');
+            if (!appIdInput || !appSecretInput) return;
+
+            if (feishuConfigState.hasSavedAppId) {
+                appIdInput.placeholder = `${feishuConfigState.maskedAppId || '已保存'}（留空不修改）`;
+            } else {
+                appIdInput.placeholder = '输入 App ID';
+            }
+
+            if (feishuConfigState.hasSavedAppSecret) {
+                appSecretInput.placeholder = '••••••（已保存，留空不修改）';
+            } else {
+                appSecretInput.placeholder = '输入 App Secret';
+            }
+        }
+        
+        // 加载配置
+        async function loadConfiguration() {
+            try {
+                const config = await apiCall('GET', '/api/config');
+
+                if (config.feishu) {
+                    feishuConfigState = {
+                        hasSavedAppId: config.feishu.has_app_id === true,
+                        hasSavedAppSecret: config.feishu.has_app_secret === true,
+                        maskedAppId: config.feishu.app_id || ''
+                    };
+                    const appIdInput = document.getElementById('feishu-app-id');
+                    const appSecretInput = document.getElementById('feishu-app-secret');
+                    if (appIdInput) {
+                        appIdInput.value = '';
+                    }
+                    if (appSecretInput) {
+                        appSecretInput.value = '';
+                    }
+                    updateFeishuInputPlaceholder();
+                }
+                
+                // 设置 LLM 配置
+                if (config.llm) {
+                    const providerSelect = document.getElementById('llm-provider');
+                    if (config.llm.provider && providerSelect) {
+                        providerSelect.value = config.llm.provider;
+                    }
+                    const providerOptions = providerSelect
+                        ? Array.from(providerSelect.options).map(option => option.value)
+                        : [];
+                    const backendKeyMap = config.llm.has_api_key_map || {};
+                    llmApiKeyMap = {};
+                    providerOptions.forEach(name => {
+                        llmApiKeyMap[name] = backendKeyMap[name] === true;
+                    });
+                    // 兼容老接口
+                    if (config.llm.provider && !llmApiKeyMap[config.llm.provider]) {
+                        llmApiKeyMap[config.llm.provider] = Boolean(config.llm.has_api_key);
+                    }
+                    updateProviderApiKeyPlaceholder();
+                    const qualityCheckEl = document.getElementById('llm-quality-check');
+                    if (qualityCheckEl) {
+                        qualityCheckEl.checked = config.llm.quality_check !== false;
+                    }
+                }
+                
+                console.log('配置加载完成');
+            } catch (e) {
+                console.error('加载配置失败:', e);
+            }
+        }
+        
+    </script>
+</body>
+</html>
+
