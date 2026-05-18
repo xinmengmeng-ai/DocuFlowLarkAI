@@ -444,6 +444,10 @@
                         <div class="text-xl font-bold text-orange-600" id="stat-api">0</div>
                     </div>
                 </div>
+                <div class="mb-4 bg-gradient-to-br from-cyan-50 to-sky-100 p-3 rounded-lg border border-cyan-100">
+                    <div class="text-xs text-slate-500">任务总耗时</div>
+                    <div class="text-xl font-bold text-cyan-700" id="task-elapsed-time">00:00:00</div>
+                </div>
 
                 <!-- 日志终端 -->
                 <div class="flex-1 flex flex-col min-h-0">
@@ -819,6 +823,9 @@
     <script>
         // --- 全局变量 ---
         const API_BASE = 'http://127.0.0.1:8000';
+        const MAX_TASK_UPLOAD_FILES = 10000;
+        const UPLOAD_BATCH_SIZE = 500;
+        const FILE_LIST_PREVIEW_LIMIT = 100;
         let ws = null;
         let currentTaskId = null;
         let selectedFiles = [];
@@ -1046,16 +1053,53 @@
 
             const grouped = { success: [], duplicate: [], failed: [] };
             latestFileStatusList.forEach(item => {
-                if (!item || !item.name) return;
-                if (item.status === 'success') grouped.success.push(item.name);
-                if (item.status === 'duplicate') grouped.duplicate.push(item.name);
-                if (item.status === 'failed' || item.status === 'partial') grouped.failed.push(item.name);
+                const entry = normalizeStatusFileItem(item);
+                if (!entry.name) return;
+                if (entry.status === 'success') grouped.success.push(entry);
+                if (entry.status === 'duplicate') grouped.duplicate.push(entry);
+                if (entry.status === 'failed' || entry.status === 'partial') grouped.failed.push(entry);
             });
             statusFileNameMap = grouped;
 
-            document.getElementById('status-success-count').innerText = grouped.success.length;
-            document.getElementById('status-duplicate-count').innerText = grouped.duplicate.length;
-            document.getElementById('status-failed-count').innerText = grouped.failed.length;
+            setElementText('status-success-count', grouped.success.length);
+            setElementText('status-duplicate-count', grouped.duplicate.length);
+            setElementText('status-failed-count', grouped.failed.length);
+        }
+
+        function normalizeStatusFileItem(item) {
+            if (typeof item === 'string') {
+                return { name: item, status: 'unknown' };
+            }
+            if (!item || typeof item !== 'object') {
+                return { name: '', status: 'unknown' };
+            }
+            return {
+                name: item.name || '',
+                status: item.status || 'unknown',
+                reason: item.reason || '',
+                error_type: item.error_type || '',
+                error_message: item.error_message || ''
+            };
+        }
+
+        function getStatusFileReason(item) {
+            if (!item || typeof item !== 'object') return '';
+            if (item.error_message) return item.error_message;
+            const reasonMap = {
+                existing_in_kb: '知识库中已存在同名文件，已跳过',
+                duplicate_in_task: '本次任务中已存在同名文件，已跳过',
+                empty_file: '文件内容为空，请补充内容后重新导入',
+                file_missing: '文件不存在或已被移动，请重新选择文件',
+                permission_denied: '没有读取文件的权限，请检查文件权限后重试',
+                oauth_invalid: '飞书授权已失效，请在配置页重新授权后重试',
+                feishu_import_failed: '飞书导入失败，请查看系统日志',
+                feishu_move_failed: '文件已导入，但移动到知识库失败，请查看系统日志'
+            };
+            if (item.error_type && reasonMap[item.error_type]) return reasonMap[item.error_type];
+            if (item.reason && reasonMap[item.reason]) return reasonMap[item.reason];
+            if (item.status === 'partial') return '文件已导入，但移动到知识库失败，请查看系统日志';
+            if (item.status === 'failed') return '处理失败，请查看系统日志';
+            return '';
         }
 
         function showStatusFilesModal(status) {
@@ -1064,17 +1108,33 @@
                 duplicate: '重复文件列表',
                 failed: '失败文件列表'
             };
-            const names = statusFileNameMap[status] || [];
+            const files = statusFileNameMap[status] || [];
             const modal = document.getElementById('status-files-modal');
             const titleEl = document.getElementById('status-files-title');
             const contentEl = document.getElementById('status-files-content');
 
-            titleEl.textContent = `${titleMap[status] || '文件列表'}（${names.length}）`;
-            if (names.length === 0) {
+            titleEl.textContent = `${titleMap[status] || '文件列表'}（${files.length}）`;
+            if (files.length === 0) {
                 contentEl.innerHTML = '<div class="text-sm text-slate-400 text-center py-4">暂无文件</div>';
             } else {
-                contentEl.innerHTML = names
-                    .map(name => `<div class="text-sm text-slate-700 py-2 px-2 border-b border-slate-200 last:border-b-0">${escapeHtml(name)}</div>`)
+                contentEl.innerHTML = files
+                    .map(item => {
+                        const entry = normalizeStatusFileItem(item);
+                        const rawErrorMessage = entry.error_message || entry.reason || '';
+                        const reason = getStatusFileReason(entry) || rawErrorMessage;
+                        if (status === 'failed') {
+                            return `
+                                <div class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3 text-sm py-2 px-2 border-b border-slate-200 last:border-b-0">
+                                    <div class="text-slate-700 break-all">${escapeHtml(entry.name)}</div>
+                                    <div>
+                                        <div class="text-[11px] text-slate-400 mb-0.5">失败原因</div>
+                                        <div class="text-red-600 break-all">${escapeHtml(reason || '处理失败，请查看系统日志')}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        return `<div class="text-sm text-slate-700 py-2 px-2 border-b border-slate-200 last:border-b-0">${escapeHtml(entry.name)}</div>`;
+                    })
                     .join('');
             }
 
@@ -1289,6 +1349,7 @@
                 case 'progress':
                     updateProgress(message.data.progress);
                     document.getElementById('current-phase').innerText = message.data.phase;
+                    updateElapsedTime(message.data.elapsed_seconds);
                     break;
                 case 'stats':
                     updateStats(
@@ -1311,6 +1372,15 @@
                     break;
                 case 'status':
                     document.getElementById('status-text').innerText = message.data.status;
+                    if (message.data.stats) {
+                        updateStats(
+                            message.data.stats.processed,
+                            message.data.stats.failed,
+                            message.data.stats.tokens,
+                            message.data.stats.api_calls,
+                            message.data.stats.duplicate || 0
+                        );
+                    }
                     break;
             }
         }
@@ -1686,18 +1756,36 @@
             addLog('System', '日志已清空', 'info');
         }
 
-        function updateStats(processed, failed, tokens, api, duplicate = 0) {
-            // 未收到全景文件状态前，先用后端统计值作为默认显示
-            if (!latestFileStatusList || latestFileStatusList.length === 0) {
-                document.getElementById('status-success-count').innerText = processed || 0;
-                document.getElementById('status-duplicate-count').innerText = duplicate || 0;
-                document.getElementById('status-failed-count').innerText = failed || 0;
+        function setElementText(elementId, value) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.innerText = value;
             }
-            document.getElementById('stat-tokens').innerText = (tokens || 0).toLocaleString();
-            document.getElementById('stat-api').innerText = api || 0;
+        }
+
+        function updateStats(processed, failed, tokens, api, duplicate = 0) {
+            setElementText('stat-tokens', (tokens || 0).toLocaleString());
+            setElementText('stat-api', api || 0);
+            setElementText('status-success-count', processed || 0);
+            setElementText('status-duplicate-count', duplicate || 0);
+            setElementText('status-failed-count', failed || 0);
             
             // 基于API调用次数计算吞吐量并更新图表
             updateThroughputByApiCount(api || 0);
+        }
+
+        function formatDuration(totalSeconds) {
+            const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+            const hours = String(Math.floor(seconds / 3600)).padStart(2, '0');
+            const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+            const remainder = String(seconds % 60).padStart(2, '0');
+            return `${hours}:${minutes}:${remainder}`;
+        }
+
+        function updateElapsedTime(totalSeconds) {
+            const elapsedEl = document.getElementById('task-elapsed-time');
+            if (!elapsedEl) return;
+            elapsedEl.innerText = formatDuration(totalSeconds);
         }
         
         // 基于API调用次数计算吞吐量（更真实的指标）
@@ -1810,20 +1898,36 @@
 
         function addFiles(files) {
             const validTypes = ['.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.markdown', '.mark', '.html', '.pptx', '.xmind', '.mm', '.opml'];
+            let skippedByLimit = 0;
             files.forEach(file => {
                 const ext = '.' + file.name.split('.').pop().toLowerCase();
                 if (validTypes.includes(ext)) {
+                    if (selectedFiles.length >= MAX_TASK_UPLOAD_FILES) {
+                        skippedByLimit += 1;
+                        return;
+                    }
                     selectedFiles.push(file);
                 } else {
                     addLog('Upload', `跳过不支持的文件: ${file.name}`, 'warn');
                 }
             });
+            if (skippedByLimit > 0) {
+                addLog('Upload', `单个任务最多支持 ${MAX_TASK_UPLOAD_FILES} 个文件，已跳过 ${skippedByLimit} 个超出上限的文件`, 'warn');
+                showNotification(`单个任务最多支持 ${MAX_TASK_UPLOAD_FILES} 个文件`, 'warn');
+            }
             renderFileList();
         }
 
         function renderFileList() {
             const container = document.getElementById('file-list');
-            container.innerHTML = selectedFiles.map((file, index) => `
+            const previewFiles = selectedFiles.slice(0, FILE_LIST_PREVIEW_LIMIT);
+            const hiddenCount = selectedFiles.length - previewFiles.length;
+            const summary = hiddenCount > 0
+                ? `<div class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
+                    已选择 ${selectedFiles.length} 个文件，仅展示前 ${FILE_LIST_PREVIEW_LIMIT} 个
+                </div>`
+                : '';
+            container.innerHTML = summary + previewFiles.map((file, index) => `
                 <div class="flex justify-between items-center bg-slate-50 p-2 rounded border border-slate-200">
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-file text-slate-400"></i>
@@ -1854,6 +1958,10 @@
                 await appAlert('请至少选择一个文件');
                 return;
             }
+            if (selectedFiles.length > MAX_TASK_UPLOAD_FILES) {
+                await appAlert(`单个任务最多支持 ${MAX_TASK_UPLOAD_FILES} 个文件`);
+                return;
+            }
             
             let taskId = null;
             
@@ -1875,30 +1983,45 @@
             
             // 步骤2: 上传文件（单独 try-catch，失败后仍可重试）
             try {
-                const formData = new FormData();
-                selectedFiles.forEach(file => formData.append('files', file));
-                
-                const uploadResponse = await fetch(`${API_BASE}/api/tasks/${taskId}/upload`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!uploadResponse.ok) {
-                    const errorText = await uploadResponse.text();
-                    throw new Error(errorText || '文件上传失败');
+                let uploadedCount = 0;
+                let duplicateCount = 0;
+                const duplicatePreview = [];
+
+                for (let start = 0; start < selectedFiles.length; start += UPLOAD_BATCH_SIZE) {
+                    const batch = selectedFiles.slice(start, start + UPLOAD_BATCH_SIZE);
+                    const formData = new FormData();
+                    batch.forEach(file => formData.append('files', file));
+
+                    const uploadResponse = await fetch(`${API_BASE}/api/tasks/${taskId}/upload`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!uploadResponse.ok) {
+                        const errorText = await uploadResponse.text();
+                        throw new Error(errorText || '文件上传失败');
+                    }
+
+                    const uploadResult = await uploadResponse.json();
+                    uploadedCount += Array.isArray(uploadResult.uploaded) ? uploadResult.uploaded.length : 0;
+                    duplicateCount += Array.isArray(uploadResult.duplicates) ? uploadResult.duplicates.length : 0;
+                    if (Array.isArray(uploadResult.duplicates)) {
+                        uploadResult.duplicates.forEach(item => duplicatePreview.push({
+                            name: item.name,
+                            status: 'duplicate'
+                        }));
+                    }
+
+                    addLog(
+                        'Upload',
+                        `批次 ${Math.floor(start / UPLOAD_BATCH_SIZE) + 1}/${Math.ceil(selectedFiles.length / UPLOAD_BATCH_SIZE)} 上传完成`,
+                        'info'
+                    );
                 }
-                
-                const uploadResult = await uploadResponse.json();
-                const uploadedCount = Array.isArray(uploadResult.uploaded) ? uploadResult.uploaded.length : 0;
-                const duplicateCount = Array.isArray(uploadResult.duplicates) ? uploadResult.duplicates.length : 0;
 
                 addLog('Upload', `上传完成: ${uploadedCount} 个文件`, 'success');
                 if (duplicateCount > 0) {
                     addLog('Upload', `检测到重复文件: ${duplicateCount} 个，已自动跳过`, 'warn');
-                    const duplicatePreview = (uploadResult.duplicates || []).map(item => ({
-                        name: item.name,
-                        status: 'duplicate'
-                    }));
                     updateFileStatusSummary(duplicatePreview);
                 }
                 
@@ -1928,6 +2051,7 @@
 
         async function startTask(taskId) {
             try {
+                updateElapsedTime(0);
                 await apiCall('POST', `/api/tasks/${taskId}/start`);
                 currentTaskId = taskId;
                 addLog('Task', `开始执行任务: ${taskId}`, 'info');
@@ -2319,6 +2443,7 @@
             
             updateProgress(0);
             updateStats(0, 0, 0, 0);
+            updateElapsedTime(0);
             clearLogs();
             addLog('System', '系统已重置', 'info');
             document.getElementById('current-phase').innerText = '等待开始...';
@@ -2934,10 +3059,50 @@
                 closeAppDialog(false);
             }
         });
+
+        async function ensureFeishuConfigSavedBeforeAuth() {
+            const appIdInput = document.getElementById('feishu-app-id');
+            const appSecretInput = document.getElementById('feishu-app-secret');
+            const appId = appIdInput ? appIdInput.value.trim() : '';
+            const appSecret = appSecretInput ? appSecretInput.value.trim() : '';
+
+            const hasEffectiveAppId = Boolean(appId) || feishuConfigState.hasSavedAppId;
+            const hasEffectiveAppSecret = Boolean(appSecret) || feishuConfigState.hasSavedAppSecret;
+            if (!hasEffectiveAppId || !hasEffectiveAppSecret) {
+                throw new Error('请先填写飞书 App ID 和 App Secret');
+            }
+
+            if (!appId && !appSecret) {
+                return;
+            }
+
+            const config = { feishu: {} };
+            if (appId) {
+                config.feishu.app_id = appId;
+            }
+            if (appSecret) {
+                config.feishu.app_secret = appSecret;
+            }
+
+            await apiCall('POST', '/api/config', config);
+            addLog('Config', '飞书配置已保存，准备授权', 'success');
+
+            if (appId) {
+                feishuConfigState.hasSavedAppId = true;
+                feishuConfigState.maskedAppId = appId.length > 10 ? `${appId.slice(0, 10)}***` : `${appId}***`;
+                appIdInput.value = '';
+            }
+            if (appSecret) {
+                feishuConfigState.hasSavedAppSecret = true;
+                appSecretInput.value = '';
+            }
+            updateFeishuInputPlaceholder();
+        }
         
         // 处理授权按钮点击
         async function handleAuthClick() {
             try {
+                await ensureFeishuConfigSavedBeforeAuth();
                 const response = await apiCall('GET', '/api/auth/url?redirect_uri=http://127.0.0.1:8000/auth/callback');
                 addLog('OAuth', '正在跳转飞书授权页面', 'info');
                 showNotification('正在打开飞书授权页...', 'info');

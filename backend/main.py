@@ -3,6 +3,8 @@ FastAPI 主入口
 """
 import asyncio
 import json
+import os
+import sys
 import tempfile
 import time
 from contextlib import asynccontextmanager
@@ -10,13 +12,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Set
 
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from config import get_config, BASE_DIR
+from config import get_config, BASE_DIR, RESOURCE_DIR
 from utils.logger import get_logger
 from utils.system_resource import calculate_dynamic_workers
 
@@ -25,6 +28,7 @@ logger = get_logger(__name__)
 # 全局状态
 app_state = {
     "tasks": {},
+    "task_handles": {},
     "connected_clients": set(),
     "system_status": "ready",  # ready, running, paused, error
     "stats": {
@@ -38,6 +42,48 @@ app_state = {
 
 # 任务运行时状态锁（并发文件处理时保护共享状态）
 task_state_lock = asyncio.Lock()
+MAX_TASK_UPLOAD_FILES = 10000
+
+
+def _running_task_handles(exclude_task_id: Optional[str] = None) -> Dict[str, asyncio.Task]:
+    handles = app_state.setdefault("task_handles", {})
+    return {
+        task_id: handle
+        for task_id, handle in handles.items()
+        if task_id != exclude_task_id and not handle.done()
+    }
+
+
+def _cleanup_task_handle(task_id: str, handle: asyncio.Task) -> None:
+    handles = app_state.setdefault("task_handles", {})
+    if handles.get(task_id) is handle:
+        handles.pop(task_id, None)
+    if not _running_task_handles():
+        app_state["system_status"] = "ready"
+
+
+async def _cancel_task_handle(task_id: str) -> bool:
+    handle = app_state.setdefault("task_handles", {}).get(task_id)
+    if not handle:
+        return False
+    if handle.done():
+        app_state["task_handles"].pop(task_id, None)
+        return False
+
+    handle.cancel()
+    try:
+        await asyncio.wait_for(handle, timeout=5)
+    except asyncio.CancelledError:
+        pass
+    except asyncio.TimeoutError:
+        logger.warning(f"取消任务超时，后台操作仍在等待中: {task_id}")
+    except Exception as e:
+        logger.warning(f"取消任务时后台任务返回异常: {task_id}: {e}")
+    finally:
+        app_state["task_handles"].pop(task_id, None)
+        if not _running_task_handles():
+            app_state["system_status"] = "ready"
+    return True
 
 
 #  lifespan 上下文管理器
@@ -175,14 +221,21 @@ class ConnectionManager:
             }
         })
     
-    async def send_progress(self, task_id: str, progress: int, phase: str):
+    async def send_progress(
+        self,
+        task_id: str,
+        progress: int,
+        phase: str,
+        elapsed_seconds: Optional[float] = None,
+    ):
         """发送进度更新"""
         await self.broadcast({
             "type": "progress",
             "data": {
                 "task_id": task_id,
                 "progress": progress,
-                "phase": phase
+                "phase": phase,
+                "elapsed_seconds": elapsed_seconds,
             }
         })
     
@@ -245,19 +298,33 @@ manager = ConnectionManager()
 async def root():
     """返回主页面"""
     html_path = BASE_DIR / "frontend" / "index.html"
+    no_cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+    }
     if html_path.exists():
-        return FileResponse(html_path)
+        return FileResponse(html_path, headers=no_cache_headers)
     return {"message": "企业知识库迁移系统 API", "version": "1.0.0"}
 
 
 @app.get("/api/status")
 async def get_status():
     """获取系统状态"""
+    active_task_handles = _running_task_handles()
+    if not active_task_handles and app_state["system_status"] == "running":
+        app_state["system_status"] = "ready"
     return {
         "status": app_state["system_status"],
         "stats": app_state["stats"],
-        "active_tasks": len(app_state["tasks"]),
-        "connected_clients": len(manager.active_connections)
+        "active_tasks": len(active_task_handles),
+        "task_count": len(app_state["tasks"]),
+        "connected_clients": len(manager.active_connections),
+        "runtime": {
+            "pid": os.getpid(),
+            "base_dir": str(BASE_DIR),
+            "resource_dir": str(RESOURCE_DIR),
+            "frozen": bool(getattr(sys, "frozen", False)),
+        },
     }
 
 
@@ -654,14 +721,39 @@ async def _collect_existing_kb_name_sets(space_id: str) -> Tuple[Set[str], Set[s
     return existing_full, existing_normalized
 
 
+def _ensure_task_upload_capacity(task: Dict[str, Any], incoming_count: int) -> None:
+    existing_count = len(task.get("files", [])) + len(task.get("duplicates", []))
+    if existing_count + incoming_count > MAX_TASK_UPLOAD_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单个任务最多支持 {MAX_TASK_UPLOAD_FILES} 个文件",
+        )
+
+
 @app.post("/api/tasks/{task_id}/upload")
-async def upload_files(task_id: str, files: List[UploadFile] = File(...)):
+async def upload_files(task_id: str, request: Request):
     """上传文件到任务"""
     if task_id not in app_state["tasks"]:
         raise HTTPException(status_code=404, detail="任务不存在")
+
+    form = await request.form(
+        max_files=MAX_TASK_UPLOAD_FILES,
+        max_fields=MAX_TASK_UPLOAD_FILES,
+    )
+    files = [
+        item
+        for item in form.getlist("files")
+        if isinstance(item, StarletteUploadFile)
+    ]
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个文件")
     
-    task = app_state["tasks"][task_id]
+    task = app_state["tasks"].get(task_id)
+    if task is None:
+        logger.warning(f"任务已不存在，跳过执行: {task_id}")
+        return
     task.setdefault("duplicates", [])
+    _ensure_task_upload_capacity(task, len(files))
     uploaded = []
     duplicates = []
     
@@ -774,12 +866,18 @@ async def start_task(task_id: str, background_tasks: BackgroundTasks):
     
     if task["status"] == "running":
         raise HTTPException(status_code=400, detail="任务正在运行中")
+
+    existing_handle = app_state.setdefault("task_handles", {}).get(task_id)
+    if existing_handle and not existing_handle.done():
+        raise HTTPException(status_code=400, detail="任务正在运行中")
     
     task["status"] = "running"
+    task["cancel_requested"] = False
     task["updated_at"] = datetime.now().isoformat()
     
-    # 在后台执行任务
-    background_tasks.add_task(run_migration_task, task_id)
+    handle = asyncio.create_task(run_migration_task(task_id), name=f"migration:{task_id}")
+    app_state["task_handles"][task_id] = handle
+    handle.add_done_callback(lambda finished_handle: _cleanup_task_handle(task_id, finished_handle))
     
     await manager.send_log("Task", f"开始执行任务: {task_id}", "info")
     
@@ -793,8 +891,10 @@ async def cancel_task(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
     
     task = app_state["tasks"][task_id]
+    task["cancel_requested"] = True
     task["status"] = "cancelled"
     task["updated_at"] = datetime.now().isoformat()
+    await _cancel_task_handle(task_id)
     
     await manager.send_log("Task", f"取消任务: {task_id}", "warn")
     
@@ -806,6 +906,12 @@ async def delete_task(task_id: str):
     """删除任务"""
     if task_id not in app_state["tasks"]:
         raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = app_state["tasks"][task_id]
+    task["cancel_requested"] = True
+    if task.get("status") == "running":
+        await manager.send_log("Task", f"删除运行中任务，正在停止后台执行: {task_id}", "warn")
+    await _cancel_task_handle(task_id)
     
     del app_state["tasks"][task_id]
     
@@ -1459,6 +1565,100 @@ def _snapshot_file_status(file_status: List[Dict[str, Any]]) -> List[Dict[str, A
     return [dict(item) for item in file_status]
 
 
+class FileProcessingFailure(Exception):
+    def __init__(self, error_type: str, error_message: str):
+        super().__init__(error_message)
+        self.error_type = error_type
+        self.error_message = error_message
+
+    def to_status(self) -> Dict[str, str]:
+        return {
+            "error_type": self.error_type,
+            "error_message": self.error_message,
+        }
+
+
+def _short_error_message(error: Any, max_length: int = 180) -> str:
+    message = str(error or "").strip()
+    message = " ".join(message.split())
+    if not message:
+        return "未知错误"
+    if len(message) > max_length:
+        return f"{message[:max_length]}..."
+    return message
+
+
+def _format_failure_reason(error: Any, stage: str = "processing") -> Dict[str, str]:
+    message = _short_error_message(error)
+    lower_message = message.lower()
+
+    if isinstance(error, FileProcessingFailure):
+        return error.to_status()
+    if isinstance(error, FileNotFoundError) or "file not found" in lower_message or "文件不存在" in message:
+        return {
+            "error_type": "file_missing",
+            "error_message": "文件不存在或已被移动，请重新选择文件",
+        }
+    if isinstance(error, PermissionError) or "permission denied" in lower_message or "access is denied" in lower_message:
+        return {
+            "error_type": "permission_denied",
+            "error_message": "没有读取文件的权限，请检查文件权限后重试",
+        }
+    if "user_access_token" in lower_message or "oauth" in lower_message or "授权" in message:
+        return {
+            "error_type": "oauth_invalid",
+            "error_message": "飞书授权已失效，请在配置页重新授权后重试",
+        }
+    if "empty" in lower_message or "内容为空" in message:
+        return {
+            "error_type": "empty_file",
+            "error_message": "文件内容为空，请补充内容后重新导入",
+        }
+
+    if stage == "move":
+        return {
+            "error_type": "feishu_move_failed",
+            "error_message": f"文件已导入，但移动到知识库失败：{message}",
+        }
+    if stage == "import" or "导入失败" in message:
+        return {
+            "error_type": "feishu_import_failed",
+            "error_message": f"飞书导入失败：{message}",
+        }
+
+    return {
+        "error_type": "processing_error",
+        "error_message": f"处理失败：{message}",
+    }
+
+
+def _validate_source_file(file_path: str) -> Optional[Dict[str, str]]:
+    source = Path(file_path)
+    if not source.exists() or not source.is_file():
+        return {
+            "error_type": "file_missing",
+            "error_message": "文件不存在或已被移动，请重新选择文件",
+        }
+    try:
+        if source.stat().st_size == 0:
+            return {
+                "error_type": "empty_file",
+                "error_message": "文件内容为空，请补充内容后重新导入",
+            }
+    except PermissionError:
+        return {
+            "error_type": "permission_denied",
+            "error_message": "没有读取文件的权限，请检查文件权限后重试",
+        }
+    return None
+
+
+def _raise_for_source_file_failure(file_path: str) -> None:
+    failure = _validate_source_file(file_path)
+    if failure:
+        raise FileProcessingFailure(failure["error_type"], failure["error_message"])
+
+
 async def run_migration_task(task_id: str):
     """运行迁移任务（动态并发 + 异步提速 + 线程安全）"""
     from core.llm.processor import LLMProcessor
@@ -1475,13 +1675,23 @@ async def run_migration_task(task_id: str):
     ]
     duplicate_count = len(duplicate_names)
     total_files = len(files) + duplicate_count
+    runtime_started = time.perf_counter()
+
+    def current_elapsed_seconds() -> float:
+        return round(max(0.0, time.perf_counter() - runtime_started), 3)
 
     if total_files == 0:
         task["status"] = "completed"
         task["progress"] = 100
         task["updated_at"] = datetime.now().isoformat()
-        task["results"] = {"processed": 0, "failed": 0, "duplicate": 0, "total": 0}
-        await manager.send_progress(task_id, 100, "完成（无文件）")
+        task["results"] = {
+            "processed": 0,
+            "failed": 0,
+            "duplicate": 0,
+            "total": 0,
+            "elapsed_seconds": 0.0,
+        }
+        await manager.send_progress(task_id, 100, "完成（无文件）", 0.0)
         return
 
     FEISHU_MAX_CONCURRENT_UPLOADS = 5
@@ -1490,7 +1700,6 @@ async def run_migration_task(task_id: str):
     workers, worker_detail = calculate_dynamic_workers(max(processable_files_count, 1))
     workers = min(workers, FEISHU_MAX_CONCURRENT_UPLOADS)
     semaphore = asyncio.Semaphore(workers)
-    runtime_started = time.perf_counter()
     chart_points: List[Dict[str, Any]] = []
 
     runtime = {
@@ -1538,7 +1747,7 @@ async def run_migration_task(task_id: str):
             status_snapshot = _snapshot_file_status(file_status_list)
             chart_snapshot = list(chart_points)
 
-        await manager.send_progress(task_id, progress, phase)
+        await manager.send_progress(task_id, progress, phase, current_elapsed_seconds())
         await manager.send_panorama(
             task_id=task_id,
             space_structure=template.get("structure", []) if template else [],
@@ -1563,6 +1772,7 @@ async def run_migration_task(task_id: str):
             await manager.send_log("Upload", f"重复文件跳过: {dup_name}", "warn")
 
         if processable_files_count == 0:
+            elapsed_seconds = current_elapsed_seconds()
             task["status"] = "completed"
             task["progress"] = 100
             task["updated_at"] = datetime.now().isoformat()
@@ -1572,6 +1782,7 @@ async def run_migration_task(task_id: str):
                 "duplicate": duplicate_count,
                 "total": total_files,
                 "workers": 0,
+                "elapsed_seconds": elapsed_seconds,
             }
             await manager.send_panorama(
                 task_id=task_id,
@@ -1579,7 +1790,7 @@ async def run_migration_task(task_id: str):
                 file_status=_snapshot_file_status(file_status_list),
             )
             await manager.send_stats(dict(app_state["stats"]))
-            await manager.send_progress(task_id, 100, "完成（全部重复）")
+            await manager.send_progress(task_id, 100, "完成（全部重复）", elapsed_seconds)
             await manager.send_log("Task", f"任务完成：全部为重复文件，共 {duplicate_count} 个", "success")
             return
 
@@ -1616,7 +1827,20 @@ async def run_migration_task(task_id: str):
                 )
             except Exception as e:
                 logger.error(f"创建模板结构失败: {e}")
-                await manager.send_log("Feishu", f"创建模板结构失败: {e}", "error")
+                elapsed_seconds = current_elapsed_seconds()
+                task["status"] = "error"
+                task["updated_at"] = datetime.now().isoformat()
+                task["results"] = {
+                    "processed": runtime["processed"],
+                    "failed": runtime["failed"],
+                    "duplicate": runtime["duplicate"],
+                    "total": total_files,
+                    "workers": workers,
+                    "elapsed_seconds": elapsed_seconds,
+                    "template_error": str(e),
+                }
+                await manager.send_log("Feishu", f"模板结构创建失败，任务已终止: {e}", "error")
+                raise RuntimeError(f"模板结构创建失败，任务已终止: {e}") from e
 
         await manager.send_panorama(
             task_id=task_id,
@@ -1633,6 +1857,9 @@ async def run_migration_task(task_id: str):
             status_index = duplicate_offset + index
 
             async with semaphore:
+                if task.get("cancel_requested"):
+                    raise asyncio.CancelledError()
+
                 async with task_state_lock:
                     file_status_list[status_index]["status"] = "processing"
                     file_status_list[status_index]["progress"] = 15
@@ -1644,7 +1871,10 @@ async def run_migration_task(task_id: str):
                 try:
                     await manager.send_log("Import", f"开始处理: {file_name}", "info")
 
+                    _raise_for_source_file_failure(file_path)
                     file_content = await asyncio.to_thread(_read_file_preview, file_path, file_name)
+                    if Path(file_path).suffix.lower() in {".txt", ".md", ".markdown", ".mark", ".html"} and not file_content.strip():
+                        raise FileProcessingFailure("empty_file", "文件内容为空，请补充内容后重新导入")
                     processor = LLMProcessor()
 
                     await manager.send_log("LLM", f"快速总结: {file_name}", "info")
@@ -1713,11 +1943,17 @@ async def run_migration_task(task_id: str):
                             file_status_list[status_index]["progress"] = 100
                     except Exception as move_error:
                         logger.error(f"移动文档失败: {move_error}")
-                        await manager.send_log("Feishu", f"移动失败: {move_error}", "error")
                         file_partial = True
+                        failure_reason = _format_failure_reason(move_error, stage="move")
                         async with task_state_lock:
                             file_status_list[status_index]["status"] = "partial"
                             file_status_list[status_index]["progress"] = 80
+                            file_status_list[status_index].update(failure_reason)
+                        try:
+                            await publish_runtime(f"部分失败: {file_name}")
+                        except Exception:
+                            pass
+                        await manager.send_log("Feishu", f"移动失败: {move_error}", "error")
 
                     async with task_state_lock:
                         app_state["stats"]["api_calls"] += 4
@@ -1725,13 +1961,19 @@ async def run_migration_task(task_id: str):
                 except Exception as file_error:
                     file_failed = True
                     logger.error(f"处理文件失败 {file_name}: {file_error}")
+                    failure_reason = _format_failure_reason(file_error)
+                    async with task_state_lock:
+                        file_status_list[status_index]["status"] = "failed"
+                        file_status_list[status_index]["progress"] = 0
+                        file_status_list[status_index].update(failure_reason)
+                    try:
+                        await publish_runtime(f"处理失败: {file_name}")
+                    except Exception:
+                        pass
                     try:
                         await manager.send_log("Task", f"{file_name} 处理失败: {file_error}", "error")
                     except Exception:
                         pass
-                    async with task_state_lock:
-                        file_status_list[status_index]["status"] = "failed"
-                        file_status_list[status_index]["progress"] = 0
                 finally:
                     async with task_state_lock:
                         runtime["completed"] += 1
@@ -1760,6 +2002,7 @@ async def run_migration_task(task_id: str):
         )
         await manager.send_stats(dict(app_state["stats"]))
 
+        elapsed_seconds = current_elapsed_seconds()
         task["status"] = "completed"
         task["progress"] = 100
         task["updated_at"] = datetime.now().isoformat()
@@ -1769,8 +2012,9 @@ async def run_migration_task(task_id: str):
             "duplicate": runtime["duplicate"],
             "total": total_files,
             "workers": workers,
+            "elapsed_seconds": elapsed_seconds,
         }
-        await manager.send_progress(task_id, 100, "完成")
+        await manager.send_progress(task_id, 100, "完成", elapsed_seconds)
         await manager.send_log(
             "Task",
             (
@@ -1780,13 +2024,20 @@ async def run_migration_task(task_id: str):
             "success",
         )
 
+    except asyncio.CancelledError:
+        logger.warning(f"任务执行已取消: {task_id}")
+        task["status"] = "cancelled"
+        task["updated_at"] = datetime.now().isoformat()
+        await manager.send_log("Task", f"任务已停止: {task_id}", "warn")
+        raise
     except Exception as e:
         logger.error(f"任务执行失败: {e}")
         task["status"] = "error"
         task["error"] = str(e)
         await manager.send_log("Task", f"任务失败: {str(e)}", "error")
     finally:
-        app_state["system_status"] = "ready"
+        if not _running_task_handles(exclude_task_id=task_id):
+            app_state["system_status"] = "ready"
 
 
 # ============ 静态文件 ============
