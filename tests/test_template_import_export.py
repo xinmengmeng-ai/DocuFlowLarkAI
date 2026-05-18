@@ -2,9 +2,12 @@
 测试模板导入导出功能
 """
 import asyncio
+import os
 import sys
 import json
 from pathlib import Path
+
+import pytest
 
 backend_dir = Path(__file__).parent.parent / "backend"
 sys.path.insert(0, str(backend_dir))
@@ -12,6 +15,15 @@ sys.path.insert(0, str(backend_dir))
 from loguru import logger
 logger.remove()
 logger.add(sys.stderr, level="INFO")
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("DOCUFLOW_RUN_LIVE_TESTS") != "1",
+    reason="Live template import/export tests are disabled unless DOCUFLOW_RUN_LIVE_TESTS=1",
+)
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+TMP_DIR = ROOT_DIR / "tmp"
+LIVE_BASE_URL = os.getenv("DOCUFLOW_LIVE_BASE_URL", "http://localhost:8000")
 
 
 async def test_export_template():
@@ -25,12 +37,13 @@ async def test_export_template():
     async with httpx.AsyncClient() as client:
         # 导出 product_kb 模板
         resp = await client.get(
-            "http://localhost:8000/api/templates/product_kb/export"
+            f"{LIVE_BASE_URL}/api/templates/product_kb/export"
         )
         
         if resp.status_code == 200:
             # 保存到文件
-            output_file = Path(__file__).parent / "exported_template.json"
+            TMP_DIR.mkdir(exist_ok=True)
+            output_file = TMP_DIR / "exported_template.json"
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(resp.json(), f, ensure_ascii=False, indent=2)
             print(f"✅ 导出成功: {output_file}")
@@ -71,14 +84,15 @@ async def test_import_template():
     }
     
     # 保存临时文件
-    temp_file = Path(__file__).parent / "temp_import.json"
+    TMP_DIR.mkdir(exist_ok=True)
+    temp_file = TMP_DIR / "temp_import.json"
     with open(temp_file, 'w', encoding='utf-8') as f:
         json.dump(test_template, f, ensure_ascii=False)
     
     async with httpx.AsyncClient() as client:
         with open(temp_file, 'rb') as f:
             resp = await client.post(
-                "http://localhost:8000/api/templates/import",
+                f"{LIVE_BASE_URL}/api/templates/import",
                 files={"file": ("test_template.json", f, "application/json")}
             )
         
@@ -101,7 +115,7 @@ async def test_list_templates():
     print("="*60)
     
     async with httpx.AsyncClient() as client:
-        resp = await client.get("http://localhost:8000/api/templates")
+        resp = await client.get(f"{LIVE_BASE_URL}/api/templates")
         
         if resp.status_code == 200:
             templates = resp.json()
@@ -131,7 +145,7 @@ async def main():
     results.append(("list", await test_list_templates()))
     
     # 清理临时文件
-    temp_file = Path(__file__).parent / "temp_import.json"
+    temp_file = TMP_DIR / "temp_import.json"
     if temp_file.exists():
         temp_file.unlink()
     

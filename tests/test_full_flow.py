@@ -1,10 +1,13 @@
 """
 测试完整任务流程（包含全景图、折线图推送）
 """
-import asyncio
-import sys
 import json
+import os
+import sys
+import asyncio
 from pathlib import Path
+
+import pytest
 
 backend_dir = Path(__file__).parent.parent / "backend"
 sys.path.insert(0, str(backend_dir))
@@ -12,6 +15,16 @@ sys.path.insert(0, str(backend_dir))
 from loguru import logger
 logger.remove()
 logger.add(sys.stderr, level="INFO")
+
+
+def _live_tests_enabled() -> bool:
+    return os.getenv("DOCUFLOW_RUN_LIVE_TESTS") == "1"
+
+
+pytestmark = pytest.mark.skipif(
+    not _live_tests_enabled(),
+    reason="Live Feishu tests require DOCUFLOW_RUN_LIVE_TESTS=1",
+)
 
 
 async def test_websocket_realtime():
@@ -85,14 +98,13 @@ async def test_node_duplicate_check():
     
     print("✅ 已授权")
     
-    # 获取知识空间列表
+    # 只允许写入调用方显式指定的测试空间，避免污染真实知识库。
     try:
-        spaces = await wiki_api.list_spaces()
-        if not spaces:
-            print("❌ 没有可用的知识空间")
-            return False
-        
-        space_id = spaces[0]["space_id"]
+        space_id = os.getenv("DOCUFLOW_LIVE_TEST_SPACE_ID", "").strip()
+        if not space_id:
+            print("⚠️ 未设置 DOCUFLOW_LIVE_TEST_SPACE_ID，跳过会写入节点的 live test")
+            return True
+
         print(f"✅ 使用知识空间: {space_id}")
         
         # 测试创建结构（带存在性检查）
@@ -129,6 +141,10 @@ async def test_node_duplicate_check():
 
 async def main():
     """运行所有测试"""
+    if not _live_tests_enabled():
+        print("已跳过 live tests；如需运行，请先设置 DOCUFLOW_RUN_LIVE_TESTS=1")
+        return
+
     print("完整流程测试")
     print("确保后端服务已启动: python backend/main.py")
     

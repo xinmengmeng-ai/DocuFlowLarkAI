@@ -21,6 +21,18 @@ cd tests
 python test_import_flow.py
 ```
 
+## Live tests
+
+默认测试链不再访问真实飞书环境。需要手动验证真实飞书链路时，必须显式开启：
+
+```bash
+set DOCUFLOW_RUN_LIVE_TESTS=1
+set DOCUFLOW_LIVE_TEST_SPACE_ID=<专用测试知识空间ID>
+pytest test_full_flow.py test_import_api.py
+```
+
+`test_full_flow.py` 中会创建节点的用例只允许写入 `DOCUFLOW_LIVE_TEST_SPACE_ID` 指定的专用测试空间，不再默认写入账号下的第一个知识空间。
+
 ## 测试要求
 
 1. **OAuth 授权**: 需要先完成飞书 OAuth 授权
