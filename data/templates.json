@@ -10796,5 +10796,442 @@
         ]
       }
     ]
+  },
+  "template_11": {
+    "id": "template_11",
+    "name": "个人知识库",
+    "description": "适用于个人工作沉淀、项目管理、技术积累与资料整理的知识库结构",
+    "created_at": "2026-05-17T20:37:18.411706",
+    "updated_at": "2026-05-17T20:37:19.209570",
+    "structure": [
+      {
+        "id": "1",
+        "name": "00-工作总览与日常记录",
+        "type": "folder",
+        "children": [
+          {
+            "id": "1-1",
+            "name": "01-周报日报与阶段记录",
+            "type": "folder",
+            "children": [
+              {
+                "id": "1-1-1",
+                "name": "周报",
+                "type": "folder"
+              },
+              {
+                "id": "1-1-2",
+                "name": "日报与日常记录",
+                "type": "folder"
+              },
+              {
+                "id": "1-1-3",
+                "name": "阶段总结与年度复盘",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "1-2",
+            "name": "02-会议与沟通",
+            "type": "folder",
+            "children": [
+              {
+                "id": "1-2-1",
+                "name": "会议纪要",
+                "type": "folder"
+              },
+              {
+                "id": "1-2-2",
+                "name": "需求沟通与问答",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "1-3",
+            "name": "03-巡检与例行检查",
+            "type": "folder",
+            "children": [
+              {
+                "id": "1-3-1",
+                "name": "测试环境巡检",
+                "type": "folder"
+              },
+              {
+                "id": "1-3-2",
+                "name": "生产环境巡检",
+                "type": "folder"
+              },
+              {
+                "id": "1-3-3",
+                "name": "专项巡查",
+                "type": "folder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "2",
+        "name": "01-项目与产品",
+        "type": "folder",
+        "children": [
+          {
+            "id": "2-1",
+            "name": "01-项目规划与设计",
+            "type": "folder",
+            "children": [
+              {
+                "id": "2-1-1",
+                "name": "项目架构与总体方案",
+                "type": "folder"
+              },
+              {
+                "id": "2-1-2",
+                "name": "原型设计与交互方案",
+                "type": "folder"
+              },
+              {
+                "id": "2-1-3",
+                "name": "实施路线图与行动手册",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "2-2",
+            "name": "02-需求与业务设计",
+            "type": "folder",
+            "children": [
+              {
+                "id": "2-2-1",
+                "name": "需求调研与需求记录",
+                "type": "folder"
+              },
+              {
+                "id": "2-2-2",
+                "name": "业务流程与功能设计",
+                "type": "folder"
+              },
+              {
+                "id": "2-2-3",
+                "name": "产品方案与改造设计",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "2-3",
+            "name": "03-业务专题",
+            "type": "folder",
+            "children": [
+              {
+                "id": "2-3-1",
+                "name": "订单与账单",
+                "type": "folder"
+              },
+              {
+                "id": "2-3-2",
+                "name": "云管平台与多云业务",
+                "type": "folder"
+              },
+              {
+                "id": "2-3-3",
+                "name": "知识库与智能化产品",
+                "type": "folder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "3",
+        "name": "02-研发与技术",
+        "type": "folder",
+        "children": [
+          {
+            "id": "3-1",
+            "name": "01-接口与后端开发",
+            "type": "folder",
+            "children": [
+              {
+                "id": "3-1-1",
+                "name": "API设计与接口案例",
+                "type": "folder"
+              },
+              {
+                "id": "3-1-2",
+                "name": "Java与服务端实现",
+                "type": "folder"
+              },
+              {
+                "id": "3-1-3",
+                "name": "数据库与SQL",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "3-2",
+            "name": "02-前端与客户端",
+            "type": "folder",
+            "children": [
+              {
+                "id": "3-2-1",
+                "name": "前端页面与组件",
+                "type": "folder"
+              },
+              {
+                "id": "3-2-2",
+                "name": "客户端与图标设计",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "3-3",
+            "name": "03-研发问题与经验",
+            "type": "folder",
+            "children": [
+              {
+                "id": "3-3-1",
+                "name": "开发问题排查",
+                "type": "folder"
+              },
+              {
+                "id": "3-3-2",
+                "name": "测试与调试",
+                "type": "folder"
+              },
+              {
+                "id": "3-3-3",
+                "name": "技术规范与知识点",
+                "type": "folder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "4",
+        "name": "03-运维与交付",
+        "type": "folder",
+        "children": [
+          {
+            "id": "4-1",
+            "name": "01-部署与环境",
+            "type": "folder",
+            "children": [
+              {
+                "id": "4-1-1",
+                "name": "安装部署手册",
+                "type": "folder"
+              },
+              {
+                "id": "4-1-2",
+                "name": "Docker与中间件",
+                "type": "folder"
+              },
+              {
+                "id": "4-1-3",
+                "name": "Linux与系统环境",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "4-2",
+            "name": "02-故障与问题处理",
+            "type": "folder",
+            "children": [
+              {
+                "id": "4-2-1",
+                "name": "线上故障",
+                "type": "folder"
+              },
+              {
+                "id": "4-2-2",
+                "name": "环境异常",
+                "type": "folder"
+              },
+              {
+                "id": "4-2-3",
+                "name": "历史问题与修复记录",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "4-3",
+            "name": "03-发布与交付",
+            "type": "folder",
+            "children": [
+              {
+                "id": "4-3-1",
+                "name": "版本发布",
+                "type": "folder"
+              },
+              {
+                "id": "4-3-2",
+                "name": "客户交付",
+                "type": "folder"
+              },
+              {
+                "id": "4-3-3",
+                "name": "实施检查与变更",
+                "type": "folder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "5",
+        "name": "04-AI与工具",
+        "type": "folder",
+        "children": [
+          {
+            "id": "5-1",
+            "name": "01-AI项目与平台",
+            "type": "folder",
+            "children": [
+              {
+                "id": "5-1-1",
+                "name": "AIGC生态与项目方案",
+                "type": "folder"
+              },
+              {
+                "id": "5-1-2",
+                "name": "智能体与工作流",
+                "type": "folder"
+              },
+              {
+                "id": "5-1-3",
+                "name": "知识库与问答系统",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "5-2",
+            "name": "02-提示词与内容生成",
+            "type": "folder",
+            "children": [
+              {
+                "id": "5-2-1",
+                "name": "通用提示词",
+                "type": "folder"
+              },
+              {
+                "id": "5-2-2",
+                "name": "产品与图像提示词",
+                "type": "folder"
+              },
+              {
+                "id": "5-2-3",
+                "name": "写作与文档提示词",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "5-3",
+            "name": "03-开发工具与自动化",
+            "type": "folder",
+            "children": [
+              {
+                "id": "5-3-1",
+                "name": "Claude与Codex",
+                "type": "folder"
+              },
+              {
+                "id": "5-3-2",
+                "name": "Coze、Dify与Ollama",
+                "type": "folder"
+              },
+              {
+                "id": "5-3-3",
+                "name": "效率工具与自动化脚本",
+                "type": "folder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "6",
+        "name": "05-个人资料与待整理",
+        "type": "folder",
+        "children": [
+          {
+            "id": "6-1",
+            "name": "01-个人积累",
+            "type": "folder",
+            "children": [
+              {
+                "id": "6-1-1",
+                "name": "随手记录",
+                "type": "folder"
+              },
+              {
+                "id": "6-1-2",
+                "name": "职业成长与角色认知",
+                "type": "folder"
+              },
+              {
+                "id": "6-1-3",
+                "name": "生活与杂项资料",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "6-2",
+            "name": "02-创作与设定",
+            "type": "folder",
+            "children": [
+              {
+                "id": "6-2-1",
+                "name": "小说与章节",
+                "type": "folder"
+              },
+              {
+                "id": "6-2-2",
+                "name": "人物卡与世界观",
+                "type": "folder"
+              },
+              {
+                "id": "6-2-3",
+                "name": "剧情与剧本素材",
+                "type": "folder"
+              }
+            ]
+          },
+          {
+            "id": "6-3",
+            "name": "03-待确认",
+            "type": "folder",
+            "children": [
+              {
+                "id": "6-3-1",
+                "name": "空白笔记",
+                "type": "folder"
+              },
+              {
+                "id": "6-3-2",
+                "name": "主题不足以判断",
+                "type": "folder"
+              },
+              {
+                "id": "6-3-3",
+                "name": "跨主题待人工复核",
+                "type": "folder"
+              }
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

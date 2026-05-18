@@ -180,4 +180,11 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+release/
+.claude/
 tmp/
+.gitnexus
+data/
+
+AGENTS.md
+CLAUDE.md

@@ -3,6 +3,8 @@
 Desktop-first migration tool for Feishu/Lark knowledge bases.  
 即开即用、无浏览器依赖、支持模板化迁移与实时监控。
 
+中文文档：[README.zh-CN.md](README.zh-CN.md)
+
 ## 中文
 
 ### 项目简介
@@ -97,3 +99,9 @@ DocuFlowLarkAI is a desktop-oriented migration tool for Feishu/Lark knowledge ba
 
 The template system now includes 10 industry domains:
 Software, Internet, Electronics, Finance, Retail, Logistics, Healthcare, Education, Transportation, and Media.
+
+## License
+
+License: Apache-2.0
+
+See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
