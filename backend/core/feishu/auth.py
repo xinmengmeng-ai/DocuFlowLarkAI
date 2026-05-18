@@ -2,12 +2,13 @@
 飞书 OAuth 2.0 认证模块
 支持 user_access_token 获取和刷新
 """
+import asyncio
 import httpx
 import time
 from typing import Optional, Dict, Any, Callable
 from loguru import logger
 
-from config import get_config
+from config import get_config, DATA_DIR
 
 
 class FeishuOAuth:
@@ -23,12 +24,20 @@ class FeishuOAuth:
         self._token_expire_time: float = 0
         self._refresh_token: Optional[str] = None
         self._refresh_token_expire_time: float = 0
+        self._refresh_failed: bool = False
+        self._token_refresh_lock = asyncio.Lock()
         self._auth_callback: Optional[Callable] = None
         
-        # 使用绝对路径确保在任何工作目录下都能找到
         from pathlib import Path
-        # token 文件保存在 backend/data/ 目录下
-        self._token_file = Path(__file__).parent.parent.parent / "data" / "user_token.json"
+        self._token_file = DATA_DIR / "user_token.json"
+        legacy_token_file = Path(__file__).parent.parent.parent / "data" / "user_token.json"
+        if legacy_token_file != self._token_file and legacy_token_file.exists() and not self._token_file.exists():
+            try:
+                self._token_file.parent.mkdir(parents=True, exist_ok=True)
+                self._token_file.write_bytes(legacy_token_file.read_bytes())
+                logger.info(f"已迁移旧 OAuth token 文件: {legacy_token_file} -> {self._token_file}")
+            except Exception as e:
+                logger.warning(f"迁移旧 OAuth token 文件失败: {e}")
         self._load_token()  # 启动时从文件加载 token
     
     def _load_token(self):
@@ -47,14 +56,18 @@ class FeishuOAuth:
             self._token_expire_time = data.get("expires_at", 0)
             self._refresh_token = data.get("refresh_token")
             self._refresh_token_expire_time = data.get("refresh_expires_at", 0)
+            self._refresh_failed = False
+
+            if not self._user_access_token and self._token_expire_time and time.time() < self._token_expire_time:
+                logger.warning("检测到损坏的 token 文件：access_token 为空但 expires_at 仍未过期，需要重新授权")
+                self._refresh_failed = True
             
             if self.is_authorized():
                 logger.info(f"已从文件加载 user_access_token (过期时间: {self._token_expire_time})")
-            elif self._refresh_token and time.time() < self._refresh_token_expire_time:
+            elif self._refresh_token and not self._refresh_failed and time.time() < self._refresh_token_expire_time:
                 logger.info("access_token 已过期，但 refresh_token 有效，将在首次使用时自动刷新")
             else:
-                logger.info("token 已过期，需要重新授权")
-                self.clear_token()
+                logger.info("token 已过期或不可用，需要重新授权")
         except Exception as e:
             logger.warning(f"加载 token 文件失败: {e}")
     
@@ -150,6 +163,29 @@ class FeishuOAuth:
             else:
                 error_msg = data.get("error_description") or data.get("error") or str(data)
                 raise Exception(f"获取 token 失败: {error_msg}")
+
+    def _extract_token_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """兼容飞书 OAuth v2 顶层 token 与 data 嵌套 token 两种响应结构。"""
+        if data.get("access_token"):
+            return data
+        nested = data.get("data", {})
+        return nested if isinstance(nested, dict) else {}
+
+    def _is_refresh_token_invalid_error(self, error: Exception) -> bool:
+        """判断刷新失败是否表示 refresh_token 本身已经失效。"""
+        message = str(error).lower()
+        invalid_markers = (
+            "invalid refresh_token",
+            "invalid refresh token",
+            "refresh_token expired",
+            "refresh token expired",
+            "code=20064",
+            "'code': 20064",
+            '"code": 20064',
+            "刷新令牌已过期",
+            "刷新令牌已失效",
+        )
+        return any(marker in message for marker in invalid_markers)
     
     async def refresh_access_token(self) -> Dict[str, Any]:
         """
@@ -159,6 +195,8 @@ class FeishuOAuth:
         """
         if not self._refresh_token:
             raise Exception("没有 refresh_token，需要重新授权")
+        if self._refresh_failed:
+            raise Exception("刷新令牌已失效，请重新授权")
         
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
@@ -175,7 +213,9 @@ class FeishuOAuth:
             data = resp.json()
             
             if data.get("code") == 0:
-                token_data = data.get("data", {})
+                token_data = self._extract_token_data(data)
+                if not token_data.get("access_token"):
+                    raise Exception(f"飞书刷新响应中没有 access_token: {data}")
                 self._save_token(token_data)
                 logger.info("user_access_token 刷新成功")
                 return token_data
@@ -187,7 +227,12 @@ class FeishuOAuth:
         import json
         import os
         
-        self._user_access_token = token_data.get("access_token")
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise ValueError("token_data 缺少 access_token，拒绝覆盖现有授权")
+
+        self._user_access_token = access_token
+        self._refresh_failed = False
         expires_in = token_data.get("expires_in", 7200)
         self._token_expire_time = time.time() + expires_in - 300  # 提前5分钟过期
         
@@ -221,47 +266,55 @@ class FeishuOAuth:
         如果 token 即将过期，会自动刷新
         如果内存中没有 token，会尝试从文件重新加载
         """
-        current_time = time.time()
-        
-        # 检查当前 token 是否有效
-        if self._user_access_token and current_time < self._token_expire_time:
-            logger.debug(f"使用内存中的 user_access_token (过期时间: {self._token_expire_time})")
-            return self._user_access_token
-        
-        # 内存中没有有效 token，尝试从文件重新加载
-        if not self._user_access_token:
-            logger.info("内存中没有 token，尝试从文件重新加载...")
-            self._load_token()
-            
-            # 重新检查
+        async with self._token_refresh_lock:
+            current_time = time.time()
+
+            # 检查当前 token 是否有效。并发等待锁的协程会在这里复用第一个协程刷新出的 token。
             if self._user_access_token and current_time < self._token_expire_time:
-                logger.info("从文件加载 token 成功")
+                logger.debug(f"使用内存中的 user_access_token (过期时间: {self._token_expire_time})")
                 return self._user_access_token
-        
-        # Token 已过期，尝试刷新
-        if self._refresh_token and current_time < self._refresh_token_expire_time:
-            logger.info("access_token 已过期，尝试使用 refresh_token 刷新...")
-            try:
-                await self.refresh_access_token()
-                return self._user_access_token
-            except Exception as e:
-                logger.error(f"刷新 token 失败: {e}")
-                # 刷新失败，继续往下走，提示用户重新授权
-        
-        # 没有有效 token，需要重新授权
-        has_access = self._user_access_token is not None
-        has_file = self._token_file.exists()
-        has_refresh = self._refresh_token is not None
-        
-        logger.error(f"没有有效的 user_access_token。内存token: {has_access}, 文件: {has_file}, refresh_token: {has_refresh}")
-        
-        # 根据情况提供具体的错误信息
-        if not has_refresh and has_access:
-            raise Exception("授权已过期且无刷新令牌。请重新授权（确保勾选'长期访问权限'）")
-        elif has_refresh and current_time >= self._refresh_token_expire_time:
-            raise Exception("刷新令牌已过期（超过7天）。请重新授权")
-        else:
-            raise Exception("没有有效的 user_access_token，请先完成 OAuth 授权")
+
+            # 内存中没有有效 token，尝试从文件重新加载
+            if not self._user_access_token:
+                logger.info("内存中没有 token，尝试从文件重新加载...")
+                self._load_token()
+                current_time = time.time()
+
+                # 重新检查
+                if self._user_access_token and current_time < self._token_expire_time:
+                    logger.info("从文件加载 token 成功")
+                    return self._user_access_token
+
+            # Token 已过期，尝试刷新
+            if self._refresh_token and not self._refresh_failed and current_time < self._refresh_token_expire_time:
+                logger.info("access_token 已过期，尝试使用 refresh_token 刷新...")
+                try:
+                    await self.refresh_access_token()
+                    if self._user_access_token and time.time() < self._token_expire_time:
+                        return self._user_access_token
+                    raise Exception("刷新后仍未获得有效 user_access_token")
+                except Exception as e:
+                    logger.error(f"刷新 token 失败: {e}")
+                    if self._is_refresh_token_invalid_error(e):
+                        self._refresh_failed = True
+                    else:
+                        logger.warning("刷新 token 临时失败，保留 refresh_token 供下次重试")
+                    # 刷新失败，继续往下走，提示用户重新授权
+
+            # 没有有效 token，需要重新授权
+            has_access = self._user_access_token is not None
+            has_file = self._token_file.exists()
+            has_refresh = self._refresh_token is not None
+
+            logger.error(f"没有有效的 user_access_token。内存token: {has_access}, 文件: {has_file}, refresh_token: {has_refresh}")
+
+            # 根据情况提供具体的错误信息
+            if not has_refresh and has_access:
+                raise Exception("授权已过期且无刷新令牌。请重新授权（确保勾选'长期访问权限'）")
+            elif has_refresh and current_time >= self._refresh_token_expire_time:
+                raise Exception("刷新令牌已过期（超过7天）。请重新授权")
+            else:
+                raise Exception("没有有效的 user_access_token，请先完成 OAuth 授权")
     
     def is_authorized(self) -> bool:
         """检查是否已完成授权"""
@@ -278,6 +331,7 @@ class FeishuOAuth:
         self._token_expire_time = 0
         self._refresh_token = None
         self._refresh_token_expire_time = 0
+        self._refresh_failed = False
         
         # 删除 token 文件
         try:
@@ -293,11 +347,17 @@ class FeishuOAuth:
         current_time = time.time()
         
         access_valid = self._user_access_token is not None and current_time < self._token_expire_time if self._token_expire_time else False
-        refresh_valid = self._refresh_token is not None and current_time < self._refresh_token_expire_time if self._refresh_token_expire_time else False
+        refresh_valid = (
+            self._refresh_token is not None
+            and not self._refresh_failed
+            and current_time < self._refresh_token_expire_time
+            if self._refresh_token_expire_time
+            else False
+        )
         
         # 计算剩余时间
-        access_remaining = max(0, int(self._token_expire_time - current_time)) if self._token_expire_time else 0
-        refresh_remaining = max(0, int(self._refresh_token_expire_time - current_time)) if self._refresh_token_expire_time else 0
+        access_remaining = max(0, int(self._token_expire_time - current_time)) if access_valid else 0
+        refresh_remaining = max(0, int(self._refresh_token_expire_time - current_time)) if refresh_valid else 0
         
         # 确定状态
         if access_valid:
