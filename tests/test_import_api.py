@@ -1,15 +1,33 @@
 #!/usr/bin/env python
 """测试导入文件API"""
 import asyncio
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 backend_dir = Path(__file__).parent.parent / "backend"
 sys.path.insert(0, str(backend_dir))
 
 from core.feishu.drive_api import drive_api
 
+
+def _live_tests_enabled() -> bool:
+    return os.getenv("DOCUFLOW_RUN_LIVE_TESTS") == "1"
+
+
+pytestmark = pytest.mark.skipif(
+    not _live_tests_enabled(),
+    reason="Live Feishu tests require DOCUFLOW_RUN_LIVE_TESTS=1",
+)
+
+
 async def test_import():
+    if not _live_tests_enabled():
+        print("已跳过 live test；如需运行，请先设置 DOCUFLOW_RUN_LIVE_TESTS=1")
+        return
+
     test_file = Path(__file__).parent.parent / "005-实施模板-计划与运营方案模板-v0.2-20181024.docx"
     
     if not test_file.exists():

@@ -50,6 +50,19 @@ def _is_port_in_use(host: str, port: int) -> bool:
         return False
 
 
+def _backend_payload_matches_runtime(data: dict, expected_base_dir: Path) -> bool:
+    if not isinstance(data, dict) or not {"status", "stats", "active_tasks"}.issubset(data.keys()):
+        return False
+    runtime = data.get("runtime") or {}
+    existing_base_dir = runtime.get("base_dir")
+    if not existing_base_dir:
+        return False
+    try:
+        return Path(existing_base_dir).resolve() == expected_base_dir.resolve()
+    except OSError:
+        return False
+
+
 def _run_server(host: str, port: int, debug: bool, error_holder: dict) -> None:
     try:
         from main import app as fastapi_app
@@ -85,7 +98,11 @@ def _preflight_backend() -> None:
         raise RuntimeError("后端预检查失败，请查看 data/logs/desktop_boot.log")
 
 
-def _wait_backend_ready(url: str, timeout_seconds: int = 30) -> bool:
+def _wait_backend_ready(
+    url: str,
+    timeout_seconds: int = 30,
+    expected_base_dir: Path | None = None,
+) -> bool:
     attempt = 0
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -94,9 +111,16 @@ def _wait_backend_ready(url: str, timeout_seconds: int = 30) -> bool:
             with urlopen(url, timeout=2) as response:
                 payload = response.read().decode("utf-8", errors="ignore")
                 data = json.loads(payload)
-                if isinstance(data, dict) and {"status", "stats", "active_tasks"}.issubset(data.keys()):
+                if _backend_payload_matches_runtime(data, expected_base_dir or _runtime_base_dir()):
                     _boot_log(f"health check passed on attempt={attempt}")
                     return True
+                if isinstance(data, dict) and {"status", "stats", "active_tasks"}.issubset(data.keys()):
+                    _boot_log(
+                        "health check found another DocuFlow runtime; "
+                        f"expected={expected_base_dir or _runtime_base_dir()} "
+                        f"actual={(data.get('runtime') or {}).get('base_dir')}"
+                    )
+                    return False
                 if attempt % 5 == 0:
                     _boot_log(f"health check non-docuflow payload on attempt={attempt}: {payload[:120]}")
         except URLError:
@@ -116,10 +140,11 @@ def main() -> None:
     host = cfg.host or "127.0.0.1"
     port = int(cfg.port or 8000)
     status_url = f"http://{host}:{port}/api/status"
+    runtime_base_dir = _runtime_base_dir()
     _boot_log(f"desktop_app main start host={host} port={port} status_url={status_url}")
 
     # 端口上已经是可用的 DocuFlow 后端时，直接复用
-    if _wait_backend_ready(status_url, timeout_seconds=2):
+    if _wait_backend_ready(status_url, timeout_seconds=2, expected_base_dir=runtime_base_dir):
         _boot_log("reuse existing backend")
         logger.info(f"检测到已运行后端，直接复用: {status_url}")
     else:
@@ -134,7 +159,7 @@ def main() -> None:
         server_thread.start()
         _boot_log("backend thread started")
 
-        if not _wait_backend_ready(status_url):
+        if not _wait_backend_ready(status_url, expected_base_dir=runtime_base_dir):
             if server_error.get("traceback"):
                 raise RuntimeError(
                     "后端线程异常退出，请查看 data/logs/desktop_boot.log 获取详细堆栈"

@@ -31,11 +31,22 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 def _bootstrap_runtime_dirs() -> None:
     """
     冻结运行时将内置资源同步到可写目录。
-    仅在目标目录不存在时执行，避免覆盖用户数据。
+    前端资源属于程序资产，每次启动都刷新，避免升级后继续加载旧页面。
+    其余目录仅在目标不存在时初始化，避免覆盖用户数据。
     """
     if not getattr(sys, "frozen", False):
         return
-    for name in ("frontend", "templates", "config"):
+
+    frontend_src = RESOURCE_DIR / "frontend"
+    frontend_dst = BASE_DIR / "frontend"
+    if frontend_src.exists():
+        if frontend_src.is_dir():
+            shutil.copytree(frontend_src, frontend_dst, dirs_exist_ok=True)
+        else:
+            frontend_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(frontend_src, frontend_dst)
+
+    for name in ("templates", "config"):
         src = RESOURCE_DIR / name
         dst = BASE_DIR / name
         if dst.exists() or not src.exists():
@@ -45,6 +56,14 @@ def _bootstrap_runtime_dirs() -> None:
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
+
+    for src_name, dst_name in (("data/templates.json", "data/templates.json"),):
+        src = RESOURCE_DIR / src_name
+        dst = BASE_DIR / dst_name
+        if dst.exists() or not src.exists():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
 
 _bootstrap_runtime_dirs()
